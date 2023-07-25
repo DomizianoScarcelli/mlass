@@ -1,0 +1,9 @@
+version: "3.4"
+
+services:
+    latentautoregressivesourceseparation:
+        image: latentautoregressivesourceseparation
+        build:
+            context: .
+            dockerfile: ./Dockerfile
+        # command: tail -F anything
