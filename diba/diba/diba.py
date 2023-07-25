@@ -8,8 +8,8 @@ from tqdm import tqdm
 from transformers import PretrainedConfig, PreTrainedModel
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
-from diba.interfaces import Likelihood, SeparationPrior
-from diba.utils import get_topk, normalize_logits
+from diba.diba.interfaces import Likelihood, SeparationPrior
+from diba.diba.utils import get_topk, normalize_logits
 
 # def _print_beams(xs_0, xs_1, scores, posterior_data, ll_coords):
 #
@@ -83,7 +83,8 @@ class _SeparationModel(PreTrainedModel):
         """Forward method."""
         num_tokens = self.likelihood.get_tokens_count()
         device = self.likelihood.get_device()
-        devices = {self.likelihood.get_device(), self.prior_0.get_device(), self.prior_1.get_device()}
+        devices = {self.likelihood.get_device(), self.prior_0.get_device(),
+                   self.prior_1.get_device()}
         if len(devices) > 1:
             raise RuntimeError(
                 "Error: inconsistent devices detected, likelihood and priors are not on the "
@@ -109,19 +110,23 @@ class _SeparationModel(PreTrainedModel):
 
         # log likelihood in sparse COO format
         assert isinstance(self.mixture[self.sample_t], int)
-        ll_coords, ll_data = self.likelihood._get_log_likelihood(self.mixture[self.sample_t])
+        ll_coords, ll_data = self.likelihood._get_log_likelihood(
+            self.mixture[self.sample_t])
 
         # compute log posterior
         if ll_coords.numel() == 0:
-            raise RuntimeError(f"Code {self.mixture[self.sample_t]} is not available in likelihood!")
+            raise RuntimeError(
+                f"Code {self.mixture[self.sample_t]} is not available in likelihood!")
 
         # Note: posterior_data has shape (num_samples, nonzeros)
-        posterior_data = _compute_log_posterior(ll_data, ll_coords, log_p_0, log_p_1)
+        posterior_data = _compute_log_posterior(
+            ll_data, ll_coords, log_p_0, log_p_1)
 
         # Convert to shape (num samples, num_tokens*num_tokens)
         coords0, coords1 = ll_coords
         num_samples, _ = posterior_data.shape
-        logits = torch.full(size=(num_samples, num_tokens**2), fill_value=numpy.log(1e-16), device=device)
+        logits = torch.full(size=(num_samples, num_tokens**2),
+                            fill_value=numpy.log(1e-16), device=device)
         logits.index_copy_(-1, coords0 * num_tokens + coords1, posterior_data)
 
         # update variables
@@ -129,7 +134,8 @@ class _SeparationModel(PreTrainedModel):
 
         return CausalLMOutputWithPast(
             logits=logits.view(num_samples, 1, num_tokens**2),
-            past_key_values=None if past_0 is None and past_1 is None else (past_0, past_1),
+            past_key_values=None if past_0 is None and past_1 is None else (
+                past_0, past_1),
         )
 
 
@@ -165,7 +171,8 @@ def separate(
         (s0, s1) returned separated signals. They have shape (num. return sequences, mixture length)
     """
     p_0, p_1 = priors
-    sep_model = _SeparationModel(p_0, p_1, likelihood, mixture=mixture, temperature=temperature)
+    sep_model = _SeparationModel(
+        p_0, p_1, likelihood, mixture=mixture, temperature=temperature)
     result = sep_model.generate(
         bos_token_id=sep_model.get_bos(),
         max_length=len(mixture) + 1,
@@ -209,12 +216,14 @@ def _ancestral_sample(
     sample_tokens = len(mixture)
 
     # check that everything is on the same device
-    assert len(set([p._get_device() for p in priors] + [likelihood.get_device()])) == 1
+    assert len(set([p._get_device()
+               for p in priors] + [likelihood.get_device()])) == 1
     device = likelihood.get_device()
 
     # initialize loop variables
     log_post_sum = torch.zeros(1, 1, dtype=torch.long, device=device)
-    xs_0, xs_1 = torch.full((2, n_samples, sample_tokens + 1), fill_value=-1, dtype=torch.long, device=device)
+    xs_0, xs_1 = torch.full((2, n_samples, sample_tokens + 1),
+                            fill_value=-1, dtype=torch.long, device=device)
     xs_0[:, 0], xs_1[:, 0] = [p.get_sos() for p in priors]
     past_0, past_1 = (None, None)
     num_current_beams = 1
@@ -223,12 +232,15 @@ def _ancestral_sample(
     for sample_t in tqdm(range(sample_tokens)):
 
         # compute log priors
-        log_p_0, past_0 = prior_0._get_logits(xs_0[:num_current_beams, : sample_t + 1], past_0)
-        log_p_1, past_1 = prior_1._get_logits(xs_1[:num_current_beams, : sample_t + 1], past_1)
+        log_p_0, past_0 = prior_0._get_logits(
+            xs_0[:num_current_beams, : sample_t + 1], past_0)
+        log_p_1, past_1 = prior_1._get_logits(
+            xs_1[:num_current_beams, : sample_t + 1], past_1)
 
         # NOTE: during first token separation batch-size should be 1
         assert len(log_p_0) == len(log_p_1)
-        assert len(log_p_0) == 1 if sample_t == 0 else len(log_p_0) <= n_samples
+        assert len(log_p_0) == 1 if sample_t == 0 else len(
+            log_p_0) <= n_samples
         assert log_p_0.shape[-1] == log_p_1.shape[-1] == likelihood.get_tokens_count()
 
         # normalize priors and apply temperature
@@ -242,12 +254,15 @@ def _ancestral_sample(
         # compute log posterior
         if ll_coords.numel() > 0:
             # Note: posterior_data has shape (n_samples, nonzeros)
-            posterior_data = _compute_log_posterior(ll_data, ll_coords, log_p_0, log_p_1)
-            log_post_sum, (beams, coords_idx) = get_topk(log_post_sum + posterior_data, n_samples)
+            posterior_data = _compute_log_posterior(
+                ll_data, ll_coords, log_p_0, log_p_1)
+            log_post_sum, (beams, coords_idx) = get_topk(
+                log_post_sum + posterior_data, n_samples)
             log_post_sum = log_post_sum.unsqueeze(-1)
             x_0, x_1 = ll_coords[:, coords_idx]
         else:
-            raise RuntimeError(f"Code {mixture[sample_t]} is not available in likelihood!")
+            raise RuntimeError(
+                f"Code {mixture[sample_t]} is not available in likelihood!")
 
         num_current_beams = len(beams)
 
@@ -265,7 +280,8 @@ def _ancestral_sample(
         past_0 = prior_0._reorder_cache(past_0, beams)
         past_1 = prior_1._reorder_cache(past_1, beams)
 
-    result_0, result_1 = xs_0[:num_current_beams, 1:], xs_1[:num_current_beams, 1:]
+    result_0, result_1 = xs_0[:num_current_beams,
+                              1:], xs_1[:num_current_beams, 1:]
 
     # check returned separation is correctly masked
     assert (result_0 == -1).sum() == 0
@@ -315,7 +331,8 @@ def _sample(posterior_data: torch.Tensor, coords: torch.LongTensor) -> Tuple[tor
     assert nnz_coords == nnz_posterior
 
     samples = torch.distributions.Categorical(logits=posterior_data).sample()
-    x_0, x_1 = torch.gather(coords, dim=-1, index=samples.view(1, batch_size).repeat(num_dims, 1))
+    x_0, x_1 = torch.gather(
+        coords, dim=-1, index=samples.view(1, batch_size).repeat(num_dims, 1))
     return x_0, x_1
 
 
@@ -344,11 +361,13 @@ def fast_sampled_separation(
     sample_tokens = len(mixture)
 
     # check that everything is on the same device
-    assert len(set([p._get_device() for p in priors] + [likelihood.get_device()])) == 1
+    assert len(set([p._get_device()
+               for p in priors] + [likelihood.get_device()])) == 1
     device = likelihood.get_device()
 
     # initialize loop variables
-    xs_0, xs_1 = torch.full((2, num_samples, sample_tokens + 1), fill_value=-1, dtype=torch.long, device=device)
+    xs_0, xs_1 = torch.full((2, num_samples, sample_tokens + 1),
+                            fill_value=-1, dtype=torch.long, device=device)
     xs_0[:, 0], xs_1[:, 0] = [p.get_sos() for p in priors]
 
     # loop over all samples tokens
@@ -374,17 +393,20 @@ def fast_sampled_separation(
         # compute log posterior
         if ll_coords.numel() > 0:
             # Note: posterior_data has shape (n_samples, nonzeros)
-            posterior_data = _compute_log_posterior(ll_data, ll_coords, log_p_0, log_p_1)
+            posterior_data = _compute_log_posterior(
+                ll_data, ll_coords, log_p_0, log_p_1)
 
             # apply topk filtering
             if top_k is not None:
                 topk_values, _ = torch.topk(posterior_data, k=top_k, dim=-1)
                 indices_to_remove = posterior_data < topk_values[..., -1:]
-                posterior_data = posterior_data.masked_fill(indices_to_remove, -np.inf)
+                posterior_data = posterior_data.masked_fill(
+                    indices_to_remove, -np.inf)
 
             x_0, x_1 = _sample(posterior_data, ll_coords)
         else:
-            raise RuntimeError(f"Code {mixture[sample_t]} is not available in likelihood!")
+            raise RuntimeError(
+                f"Code {mixture[sample_t]} is not available in likelihood!")
 
         # Note: x_0, x_1 have shape (n_sample,)
         xs_0[:, sample_t + 1] = x_0

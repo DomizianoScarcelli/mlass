@@ -5,7 +5,7 @@ from typing import Any, Tuple
 import torch
 from hydra.core.config_store import ConfigStore
 
-from diba import Likelihood, SeparationPrior
+from diba.diba import Likelihood, SeparationPrior
 from transformers import GPT2LMHeadModel
 
 
@@ -25,7 +25,8 @@ class UnconditionedTransformerPrior(SeparationPrior):
         return self.transformer.lm_head.out_features
 
     def get_logits(self, token_ids: torch.LongTensor, past_key_values: Any = None) -> Tuple[torch.Tensor, Any]:
-        token_ids = token_ids[:, -1:] if past_key_values is not None else token_ids
+        token_ids = token_ids[:, -
+                              1:] if past_key_values is not None else token_ids
         output = self.transformer(token_ids, past_key_values=past_key_values)
         logits, past = output.logits, output.past_key_values
         return logits[:, -1, :], past

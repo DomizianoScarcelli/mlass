@@ -12,7 +12,7 @@ from jukebox.make_models import make_vqvae
 from jukebox.utils.audio_utils import audio_preprocess
 from jukebox.utils.dist_utils import setup_dist_from_mpi
 from jukebox.vqvae.vqvae import VQVAE
-from lass.utils import ROOT_DIRECTORY
+from .utils import ROOT_DIRECTORY
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -29,7 +29,8 @@ def load_checkpoint(checkpoint_path: Union[Path, str]) -> Tuple[sparse.COO, int]
     """
     # get number of iterations from filename
     checkpoint_filename = Path(checkpoint_path).name
-    match = re.fullmatch(r"sum_dist_(?P<iterations>[0-9]+)\.npz", checkpoint_filename)
+    match = re.fullmatch(
+        r"sum_dist_(?P<iterations>[0-9]+)\.npz", checkpoint_filename)
     if match is None:
         raise RuntimeError(
             f"The filename {checkpoint_filename} is not in the correct format!"
@@ -67,7 +68,8 @@ def estimate_distribution(
     """
 
     def compute_latent(x: torch.Tensor, vqvae: VQVAE, level: int) -> Sequence[int]:
-        z = vqvae.encode(x, start_level=level, end_level=level+1, bs_chunks=1)[0].cpu().numpy()
+        z = vqvae.encode(x, start_level=level, end_level=level +
+                         1, bs_chunks=1)[0].cpu().numpy()
         return np.reshape(z, newshape=-1, order="F").tolist()
 
     rank, local_rank, device = setup_dist_from_mpi(port=29540)
@@ -87,7 +89,8 @@ def estimate_distribution(
         pin_memory=False,
         shuffle=True,
         drop_last=True,
-        collate_fn=lambda batch: torch.stack([torch.from_numpy(b) for b in batch], 0),
+        collate_fn=lambda batch: torch.stack(
+            [torch.from_numpy(b) for b in batch], 0),
     )
 
     # VQ-VAE arithmetic statistics generation
@@ -112,7 +115,7 @@ def estimate_distribution(
 
                 # get tracks from batch
                 x_1 = x[: batch_size // 2].to(device)
-                x_2 = x[batch_size // 2 :].to(device)
+                x_2 = x[batch_size // 2:].to(device)
                 x_sum = alpha[0] * x_1 + alpha[1] * x_2
 
                 # compute latent vectors
@@ -134,7 +137,7 @@ def estimate_distribution(
                     )
 
                     # store results
-                    output_dir=Path(output_dir)
+                    output_dir = Path(output_dir)
                     output_dir.mkdir(parents=True, exist_ok=True)
                     checkpoint_path = output_dir / f"sum_dist_{iterations}.npz"
                     sparse.save_npz(str(checkpoint_path), sum_dist)
@@ -172,7 +175,8 @@ if __name__ == "__main__":
         help="Directory in which the output estimation will be stored",
         default=str(ROOT_DIRECTORY / "logs/vqvae_sum_distribution"),
     )
-    parser.add_argument("--epochs", type=int, help="Number of epochs", default=100)
+    parser.add_argument("--epochs", type=int,
+                        help="Number of epochs", default=100)
 
     parser.add_argument(
         "--sample-length",
@@ -180,7 +184,8 @@ if __name__ == "__main__":
         help="Size in seconds of audio chunk used during estimation",
         default=11.88862,
     )
-    parser.add_argument("--sample-rate", type=int, help="Sample rate", default=44100)
+    parser.add_argument("--sample-rate", type=int,
+                        help="Sample rate", default=44100)
     parser.add_argument(
         "--alpha",
         type=float,
@@ -200,7 +205,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--checkpoint-path", type=str, help="Checkpoint path", default=None
     )
-    parser.add_argument("--vqvae-level", type=int, help="VQVAE Level", default=2)
+    parser.add_argument("--vqvae-level", type=int,
+                        help="VQVAE Level", default=2)
 
     args = vars(parser.parse_args())
     vqvae_path = args.pop("vqvae_path")

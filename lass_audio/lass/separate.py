@@ -10,7 +10,7 @@ import torchaudio
 import tqdm
 from diba.diba import Likelihood
 from torch.utils.data import DataLoader
-from diba.interfaces import SeparationPrior
+from diba.diba.interfaces import SeparationPrior
 
 from lass.datasets import SeparationDataset
 from lass.datasets import SeparationSubset
@@ -26,7 +26,7 @@ audio_root = Path(__file__).parent.parent
 class Separator(torch.nn.Module, abc.ABC):
     def __init__(self):
         super().__init__()
-        
+
     @abc.abstractmethod
     def separate(mixture) -> Mapping[str, torch.Tensor]:
         ...
@@ -37,8 +37,8 @@ class BeamsearchSeparator(Separator):
         self,
         encode_fn: Callable,
         decode_fn: Callable,
-        priors: Mapping[str, SeparationPrior], 
-        likelihood: Likelihood, 
+        priors: Mapping[str, SeparationPrior],
+        likelihood: Likelihood,
         num_beams: int,
     ):
         super().__init__()
@@ -47,13 +47,15 @@ class BeamsearchSeparator(Separator):
         self.priors = list(priors.values())
         self.num_beams = num_beams
 
-        self.encode_fn = encode_fn #lambda x: vqvae.encode(x.unsqueeze(-1), vqvae_level, vqvae_level + 1).view(-1).tolist()
-        self.decode_fn = decode_fn #lambda x: decode_latent_codes(vqvae, x.squeeze(0), level=vqvae_level)
+        # lambda x: vqvae.encode(x.unsqueeze(-1), vqvae_level, vqvae_level + 1).view(-1).tolist()
+        self.encode_fn = encode_fn
+        # lambda x: decode_latent_codes(vqvae, x.squeeze(0), level=vqvae_level)
+        self.decode_fn = decode_fn
 
     @torch.no_grad()
     def separate(self, mixture: torch.Tensor) -> Mapping[str, torch.Tensor]:
         # convert signal to codes
-        mixture_codes = self.encode_fn(mixture) 
+        mixture_codes = self.encode_fn(mixture)
 
         # separate mixture (x has shape [2, num. tokens])
         x = diba.fast_beamsearch_separation(
@@ -62,18 +64,18 @@ class BeamsearchSeparator(Separator):
             mixture=mixture_codes,
             num_beams=self.num_beams,
         )
-        
+
         # decode results
         return {source: self.decode_fn(xi) for source, xi in zip(self.source_types, x)}
 
-    
+
 class TopkSeparator(Separator):
     def __init__(
         self,
         encode_fn: Callable,
         decode_fn: Callable,
         priors: Mapping[str, SeparationPrior],
-        likelihood: Likelihood, 
+        likelihood: Likelihood,
         num_samples: int,
         temperature: float = 1.0,
         top_k: int = None,
@@ -90,7 +92,7 @@ class TopkSeparator(Separator):
         self.decode_fn = decode_fn
 
     def separate(self, mixture: torch.Tensor):
-        mixture_codes = self.encode_fn(mixture) 
+        mixture_codes = self.encode_fn(mixture)
 
         x_0, x_1 = diba.fast_sampled_separation(
             priors=self.priors,
@@ -112,10 +114,11 @@ class TopkSeparator(Separator):
 
         res_0 = torch.cat(res_0, dim=0)
         res_1 = torch.cat(res_1, dim=0)
-        
+
         # select best
-        best_idx = (0.5 * res_0 + 0.5 * res_1 - mixture.view(1,-1)).norm(p=2, dim=-1).argmin()
-        return  {source: self.decode_fn(xi) for source, xi in zip(self.source_types, [x_0[best_idx], x_1[best_idx]])}
+        best_idx = (0.5 * res_0 + 0.5 * res_1 -
+                    mixture.view(1, -1)).norm(p=2, dim=-1).argmin()
+        return {source: self.decode_fn(xi) for source, xi in zip(self.source_types, [x_0[best_idx], x_1[best_idx]])}
 
 
 # -----------------------------------------------------------------------------
@@ -153,7 +156,7 @@ def separate_dataset(
 
         # generate mixture
         mixture = 0.5 * ori_1 + 0.5 * ori_2
-        mixture = mixture.squeeze(0) # shape: [1 , sample-length]
+        mixture = mixture.squeeze(0)  # shape: [1 , sample-length]
         seps = separator.separate(mixture=mixture)
         chunk_path.mkdir(parents=True)
 
@@ -176,11 +179,13 @@ def save_separation(
     path: Path,
 ):
     assert_is_audio(*original_signals, *separated_signals)
-    #assert original_1.shape == original_2.shape == separation_1.shape == separation_2.shape
+    # assert original_1.shape == original_2.shape == separation_1.shape == separation_2.shape
     assert len(original_signals) == len(separated_signals)
     for i, (ori, sep) in enumerate(zip(original_signals, separated_signals)):
-        torchaudio.save(str(path / f"ori{i+1}.wav"), ori.view(-1).cpu(), sample_rate=sample_rate)
-        torchaudio.save(str(path / f"sep{i+1}.wav"), sep.view(-1).cpu(), sample_rate=sample_rate)
+        torchaudio.save(str(path / f"ori{i+1}.wav"),
+                        ori.view(-1).cpu(), sample_rate=sample_rate)
+        torchaudio.save(str(path / f"sep{i+1}.wav"),
+                        sep.view(-1).cpu(), sample_rate=sample_rate)
 
 
 def main(
@@ -206,7 +211,7 @@ def main(
     audio_dir_1 = Path(audio_dir_1)
     audio_dir_2 = Path(audio_dir_2)
 
-    #if not resume and save_path.exists():
+    # if not resume and save_path.exists():
     #    raise ValueError(f"Path {save_path} already exists!")
 
     rank, local_rank, device = setup_dist_from_mpi(port=29533, verbose=True)
@@ -235,9 +240,12 @@ def main(
     # create separator
     level = vqvae.levels - 1
     separator = BeamsearchSeparator(
-        encode_fn=lambda x: vqvae.encode(x.unsqueeze(-1).to(device), level, level + 1)[-1].squeeze(0).tolist(), # TODO: check if correct
-        decode_fn=lambda x: decode_latent_codes(vqvae, x.squeeze(0), level=level),
-        priors={k:JukeboxPrior(p.prior, torch.zeros((), dtype=torch.float32, device=device)) for k,p in priors.items()},
+        encode_fn=lambda x: vqvae.encode(
+            x.unsqueeze(-1).to(device), level, level + 1)[-1].squeeze(0).tolist(),  # TODO: check if correct
+        decode_fn=lambda x: decode_latent_codes(
+            vqvae, x.squeeze(0), level=level),
+        priors={k: JukeboxPrior(p.prior, torch.zeros(
+            (), dtype=torch.float32, device=device)) for k, p in priors.items()},
         likelihood=SparseLikelihood(sum_frequencies_path, device, 3.0),
         num_beams=10,
         **kwargs,
@@ -265,6 +273,7 @@ def main(
         save_fn=functools.partial(save_separation, sample_rate=sample_rate),
         resume=resume,
     )
+
 
 if __name__ == "__main__":
     main()

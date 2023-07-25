@@ -8,9 +8,9 @@ import pytest
 import torch
 from click.testing import CliRunner
 
-from diba import cli
+from diba.diba import cli
 from diba.diba import beamsearch_separation
-from diba.interfaces import Likelihood, SeparationPrior
+from diba.diba.interfaces import Likelihood, SeparationPrior
 
 
 @pytest.fixture
@@ -70,8 +70,10 @@ class SumUniformLikelihood(Likelihood):
         super().__init__()
 
     def get_log_likelihood(self, token_idx: int):
-        coords = [(i, j) for i, j in product(range(token_idx + 1), range(token_idx + 1)) if i + j == token_idx]
-        data = torch.tensor([1.0 / len(coords)] * len(coords), dtype=torch.float32)
+        coords = [(i, j) for i, j in product(range(token_idx + 1),
+                                             range(token_idx + 1)) if i + j == token_idx]
+        data = torch.tensor([1.0 / len(coords)] *
+                            len(coords), dtype=torch.float32)
         coords = torch.tensor(coords, dtype=torch.long).T
         return coords, torch.log(data)
 
@@ -138,7 +140,8 @@ def test_beamsearch():
             )
 
             r0, r1 = torch.tensor(r0), torch.tensor(r1)
-            assert torch.equal(r0 + r1, torch.tensor(mixture)), f"{(r0+r1).tolist()} != {x1.tolist()} (expected)"
+            assert torch.equal(r0 + r1, torch.tensor(mixture)
+                               ), f"{(r0+r1).tolist()} != {x1.tolist()} (expected)"
 
             r0_eq, r1_eq = torch.equal(r0, x0), torch.equal(r1, x1)
 

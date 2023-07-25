@@ -19,8 +19,7 @@ RUN python -m pip install -r requirements.txt
 WORKDIR /
 COPY . .
 
-ENV PYTHONPATH=.
 # During debugging, this entry point will be overridden. For more information, please refer to https://aka.ms/vscode-docker-python-debug
 # CMD ["python", "-m", "lass_audio.lass.separate"]
-CMD ["python", "lass_audio/lass/separate.py"]
+CMD ["python", "-m", "lass_audio.lass.separate.py"]
 

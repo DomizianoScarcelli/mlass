@@ -9,7 +9,7 @@ import librosa
 import torch
 from torch.utils.data import Dataset
 
-from lass.utils import get_nonsilent_chunks, load_audio_tracks
+from .utils import get_nonsilent_chunks, load_audio_tracks
 
 
 class SeparationDataset(Dataset, ABC):

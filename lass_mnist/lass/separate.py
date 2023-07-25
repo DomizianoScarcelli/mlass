@@ -49,13 +49,13 @@ def batched_psnr_unconditional(gts: List[torch.Tensor], gens: List[torch.Tensor]
     (gt1, gt2), (gen1, gen2) = gts, gens
     dims = list(range(1, len(gt1.shape)))
     batched_psnr_12 = (
-            0.5 * psnr_grayscale(gt1, gen1, reduction=None, dim=dims) +
-            0.5 * psnr_grayscale(gt2, gen2, reduction=None, dim=dims)
+        0.5 * psnr_grayscale(gt1, gen1, reduction=None, dim=dims) +
+        0.5 * psnr_grayscale(gt2, gen2, reduction=None, dim=dims)
     )
 
     batched_psnr_21 = (
-            0.5 * psnr_grayscale(gt1, gen2, reduction=None, dim=dims) +
-            0.5 * psnr_grayscale(gt2, gen1, reduction=None, dim=dims)
+        0.5 * psnr_grayscale(gt1, gen2, reduction=None, dim=dims) +
+        0.5 * psnr_grayscale(gt2, gen1, reduction=None, dim=dims)
     )
 
     bpsnr = torch.stack([batched_psnr_12, batched_psnr_21], dim=-1)
@@ -100,7 +100,8 @@ def generate_samples(
 
     _, z_e_x_mixture, _ = model(gtm)
     codes_mixture = model.codeBook(z_e_x_mixture)
-    codes_mixture = codes_mixture.view(batch_size, latent_length ** 2).tolist()  # (B, H**2)
+    codes_mixture = codes_mixture.view(
+        batch_size, latent_length ** 2).tolist()  # (B, H**2)
 
     # instantiate diba interface
     label0, label1 = bos
@@ -143,6 +144,7 @@ class CheckpointsConfig:
     autoregressive: str = MISSING
     sums: str = MISSING
 
+
 @dataclass
 class SeparationMethodConfig:
     do_sample: Optional[bool] = None
@@ -173,7 +175,7 @@ class EvaluateSeparationConfig:
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
     checkpoints: CheckpointsConfig = CheckpointsConfig()
-    #method: SeparationMethodConfig = SeparationMethodConfig()
+    # method: SeparationMethodConfig = SeparationMethodConfig()
 
 
 CONFIG_STORE.store(
@@ -191,10 +193,10 @@ def main(cfg):
     assert isinstance(transformer, PreTrainedModel)
 
     # create output directory
-    result_dir = ROOT_DIR/ "separated-images"
+    result_dir = ROOT_DIR / "separated-images"
     result_dir.mkdir(parents=True)
     (result_dir / "sep").mkdir()
-    (result_dir/ "ori").mkdir()
+    (result_dir / "ori").mkdir()
 
     # Define the train & test dataSets
     test_set = hydra.utils.instantiate(cfg.dataset)
@@ -223,7 +225,6 @@ def main(cfg):
     transformer.eval()
 
     uncond_bos = 0
-
 
     # main separation loop
     for i, batch in enumerate(tqdm.tqdm(test_loader)):
@@ -262,9 +263,9 @@ def main(cfg):
         for j in range(len(gen1)):
             img_idx = i * cfg.batch_size + j
             save_image(gen1[j], result_dir / f"sep/{img_idx}-1.png")
-            save_image(gen2[j], result_dir/ f"sep/{img_idx}-2.png")
-            save_image(gt1[j], result_dir/ f"ori/{img_idx}-1.png")
-            save_image(gt2[j],  result_dir/ f"ori/{img_idx}-2.png")
+            save_image(gen2[j], result_dir / f"sep/{img_idx}-2.png")
+            save_image(gt1[j], result_dir / f"ori/{img_idx}-1.png")
+            save_image(gt2[j],  result_dir / f"ori/{img_idx}-2.png")
 
 
 if __name__ == '__main__':
