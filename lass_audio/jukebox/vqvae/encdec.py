@@ -1,7 +1,8 @@
 import torch as t
 import torch.nn as nn
-from jukebox.vqvae.resnet import Resnet, Resnet1D
-from jukebox.utils.torch_utils import assert_shape
+from lass_audio.jukebox.vqvae.resnet import Resnet, Resnet1D
+from lass_audio.jukebox.utils.torch_utils import assert_shape
+
 
 class EncoderConvBlock(nn.Module):
     def __init__(self, input_emb_width, output_emb_width, down_t,
@@ -14,8 +15,10 @@ class EncoderConvBlock(nn.Module):
         if down_t > 0:
             for i in range(down_t):
                 block = nn.Sequential(
-                    nn.Conv1d(input_emb_width if i == 0 else width, width, filter_t, stride_t, pad_t),
-                    Resnet1D(width, depth, m_conv, dilation_growth_rate, dilation_cycle, zero_out, res_scale),
+                    nn.Conv1d(input_emb_width if i == 0 else width,
+                              width, filter_t, stride_t, pad_t),
+                    Resnet1D(width, depth, m_conv, dilation_growth_rate,
+                             dilation_cycle, zero_out, res_scale),
                 )
                 blocks.append(block)
             block = nn.Conv1d(width, output_emb_width, 3, 1, 1)
@@ -24,6 +27,7 @@ class EncoderConvBlock(nn.Module):
 
     def forward(self, x):
         return self.model(x)
+
 
 class DecoderConvBock(nn.Module):
     def __init__(self, input_emb_width, output_emb_width, down_t,
@@ -36,14 +40,17 @@ class DecoderConvBock(nn.Module):
             blocks.append(block)
             for i in range(down_t):
                 block = nn.Sequential(
-                    Resnet1D(width, depth, m_conv, dilation_growth_rate, dilation_cycle, zero_out=zero_out, res_scale=res_scale, reverse_dilation=reverse_decoder_dilation, checkpoint_res=checkpoint_res),
-                    nn.ConvTranspose1d(width, input_emb_width if i == (down_t - 1) else width, filter_t, stride_t, pad_t)
+                    Resnet1D(width, depth, m_conv, dilation_growth_rate, dilation_cycle, zero_out=zero_out,
+                             res_scale=res_scale, reverse_dilation=reverse_decoder_dilation, checkpoint_res=checkpoint_res),
+                    nn.ConvTranspose1d(width, input_emb_width if i == (
+                        down_t - 1) else width, filter_t, stride_t, pad_t)
                 )
                 blocks.append(block)
         self.model = nn.Sequential(*blocks)
 
     def forward(self, x):
         return self.model(x)
+
 
 class Encoder(nn.Module):
     def __init__(self, input_emb_width, output_emb_width, levels, downs_t,
@@ -58,10 +65,11 @@ class Encoder(nn.Module):
         block_kwargs_copy = dict(**block_kwargs)
         if 'reverse_decoder_dilation' in block_kwargs_copy:
             del block_kwargs_copy['reverse_decoder_dilation']
-        level_block = lambda level, down_t, stride_t: EncoderConvBlock(input_emb_width if level == 0 else output_emb_width,
-                                                           output_emb_width,
-                                                           down_t, stride_t,
-                                                           **block_kwargs_copy)
+
+        def level_block(level, down_t, stride_t): return EncoderConvBlock(input_emb_width if level == 0 else output_emb_width,
+                                                                          output_emb_width,
+                                                                          down_t, stride_t,
+                                                                          **block_kwargs_copy)
         self.level_blocks = nn.ModuleList()
         iterator = zip(list(range(self.levels)), downs_t, strides_t)
         for level, down_t, stride_t in iterator:
@@ -84,6 +92,7 @@ class Encoder(nn.Module):
 
         return xs
 
+
 class Decoder(nn.Module):
     def __init__(self, input_emb_width, output_emb_width, levels, downs_t,
                  strides_t, **block_kwargs):
@@ -96,10 +105,10 @@ class Decoder(nn.Module):
 
         self.strides_t = strides_t
 
-        level_block = lambda level, down_t, stride_t: DecoderConvBock(output_emb_width,
-                                                          output_emb_width,
-                                                          down_t, stride_t,
-                                                          **block_kwargs)
+        def level_block(level, down_t, stride_t): return DecoderConvBock(output_emb_width,
+                                                                         output_emb_width,
+                                                                         down_t, stride_t,
+                                                                         **block_kwargs)
         self.level_blocks = nn.ModuleList()
         iterator = zip(list(range(self.levels)), downs_t, strides_t)
         for level, down_t, stride_t in iterator:
@@ -118,7 +127,8 @@ class Decoder(nn.Module):
         assert_shape(x, (N, emb, T))
 
         # 32, 64 ...
-        iterator = reversed(list(zip(list(range(self.levels)), self.downs_t, self.strides_t)))
+        iterator = reversed(
+            list(zip(list(range(self.levels)), self.downs_t, self.strides_t)))
         for level, down_t, stride_t in iterator:
             level_block = self.level_blocks[level]
             x = level_block(x)

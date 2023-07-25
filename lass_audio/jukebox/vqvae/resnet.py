@@ -1,7 +1,8 @@
 import math
 import torch.nn as nn
-import jukebox.utils.dist_adapter as dist
-from jukebox.utils.checkpoint import checkpoint
+import lass_audio.jukebox.utils.dist_adapter as dist
+from lass_audio.jukebox.utils.checkpoint import checkpoint
+
 
 class ResConvBlock(nn.Module):
     def __init__(self, n_in, n_state):
@@ -16,13 +17,16 @@ class ResConvBlock(nn.Module):
     def forward(self, x):
         return x + self.model(x)
 
+
 class Resnet(nn.Module):
     def __init__(self, n_in, n_depth, m_conv=1.0):
         super().__init__()
-        self.model = nn.Sequential(*[ResConvBlock(n_in, int(m_conv * n_in)) for _ in range(n_depth)])
+        self.model = nn.Sequential(
+            *[ResConvBlock(n_in, int(m_conv * n_in)) for _ in range(n_depth)])
 
     def forward(self, x):
         return self.model(x)
+
 
 class ResConv1DBlock(nn.Module):
     def __init__(self, n_in, n_state, dilation=1, zero_out=False, res_scale=1.0):
@@ -43,16 +47,19 @@ class ResConv1DBlock(nn.Module):
     def forward(self, x):
         return x + self.res_scale * self.model(x)
 
+
 class Resnet1D(nn.Module):
     def __init__(self, n_in, n_depth, m_conv=1.0, dilation_growth_rate=1, dilation_cycle=None, zero_out=False, res_scale=False, reverse_dilation=False, checkpoint_res=False):
         super().__init__()
+
         def _get_depth(depth):
             if dilation_cycle is None:
                 return depth
             else:
                 return depth % dilation_cycle
         blocks = [ResConv1DBlock(n_in, int(m_conv * n_in),
-                                 dilation=dilation_growth_rate ** _get_depth(depth),
+                                 dilation=dilation_growth_rate ** _get_depth(
+                                     depth),
                                  zero_out=zero_out,
                                  res_scale=1.0 if not res_scale else 1.0 / math.sqrt(n_depth))
                   for depth in range(n_depth)]

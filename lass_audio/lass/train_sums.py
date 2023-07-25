@@ -6,12 +6,12 @@ from typing import Sequence, Tuple, Union
 import numpy as np
 import sparse
 import torch
-from jukebox.data.files_dataset import FilesAudioDataset
-from jukebox.hparams import Hyperparams, setup_hparams
-from jukebox.make_models import make_vqvae
-from jukebox.utils.audio_utils import audio_preprocess
-from jukebox.utils.dist_utils import setup_dist_from_mpi
-from jukebox.vqvae.vqvae import VQVAE
+from lass_audio.jukebox.data.files_dataset import FilesAudioDataset
+from lass_audio.jukebox.hparams import Hyperparams, setup_hparams
+from lass_audio.jukebox.make_models import make_vqvae
+from lass_audio.jukebox.utils.audio_utils import audio_preprocess
+from lass_audio.jukebox.utils.dist_utils import setup_dist_from_mpi
+from lass_audio.jukebox.vqvae.vqvae import VQVAE
 from .utils import ROOT_DIRECTORY
 from torch.utils.data import DataLoader
 from tqdm import tqdm

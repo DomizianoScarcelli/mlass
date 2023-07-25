@@ -3,11 +3,12 @@ import importlib
 import math
 import numpy as np
 import torch
-import jukebox.utils.dist_adapter as dist
+import lass_audio.jukebox.utils.dist_adapter as dist
 from torch.optim import Optimizer
 from torch._utils import _flatten_dense_tensors
 
-from jukebox.utils.dist_utils import allreduce
+from lass_audio.jukebox.utils.dist_utils import allreduce
+
 
 def adam_step(p: torch.Tensor, out_p: torch.Tensor, exp_avg: torch.Tensor, exp_avg_sq: torch.Tensor, grad: torch.Tensor,
               lr: float, beta1: float, beta2: float, eps: float, scale: float, step: int, eps_mode: int, bias_correction: int, weight_decay: float):
@@ -28,6 +29,7 @@ def adam_step(p: torch.Tensor, out_p: torch.Tensor, exp_avg: torch.Tensor, exp_a
 
     p.add_(exp_avg/denom + weight_decay*p.float(), alpha=-step_size)
 
+
 # Import fused_adam if we have apex, otherwise use regular adam
 try:
     fused_adam_cuda = importlib.import_module("fused_adam_cuda")
@@ -35,6 +37,7 @@ try:
     print("Using apex fused_adam_cuda")
 except ModuleNotFoundError:
     fused_adam_step = adam_step
+
 
 def backward(loss, params, scalar, fp16, logger):
     # Perform backward
@@ -52,19 +55,28 @@ def backward(loss, params, scalar, fp16, logger):
             loss.backward()
             gn = grad_norm(params, scale)
             overflow_grad = check_overflow(gn)
-            overflow_grad = allreduce(int(overflow_grad), op=dist.ReduceOp.MAX) > 0
+            overflow_grad = allreduce(
+                int(overflow_grad), op=dist.ReduceOp.MAX) > 0
             scalar.update_scale(overflow_grad)
         else:
             gn = 0.0
             overflow_grad = True
-        loss = (loss.detach().float()) / scale # Should delete computation graph for overflow
+        # Should delete computation graph for overflow
+        loss = (loss.detach().float()) / scale
         if logger.rank == 0:
-            if loss > 12.: print(f"\nWarning. Loss is {loss}")
-            if overflow_loss: print(f"\nOverflow in forward. Loss {loss}, lgscale {np.log2(scale)}. Skipping batch completely (no backward, scale update)")
-            elif overflow_grad: print(f"\nOverflow in backward. Loss {loss}, grad norm {gn}, lgscale {np.log2(scale)}, new lgscale {np.log2(scalar.get_scale())}")
+            if loss > 12.:
+                print(f"\nWarning. Loss is {loss}")
+            if overflow_loss:
+                print(
+                    f"\nOverflow in forward. Loss {loss}, lgscale {np.log2(scale)}. Skipping batch completely (no backward, scale update)")
+            elif overflow_grad:
+                print(
+                    f"\nOverflow in backward. Loss {loss}, grad norm {gn}, lgscale {np.log2(scale)}, new lgscale {np.log2(scalar.get_scale())}")
         return loss, scale, gn, overflow_loss, overflow_grad
 
 # Automatic loss scaling
+
+
 class LossScalar(object):
     def __init__(self,
                  loss_scale,
@@ -80,7 +92,7 @@ class LossScalar(object):
             self.loss_scale = loss_scale
         self.max_loss_scale = 2.**24
         self.scale_factor = scale_factor
-        self.scale_window  = scale_window
+        self.scale_window = scale_window
         self.unskipped = 0
         self.overflow = False
 
@@ -95,20 +107,27 @@ class LossScalar(object):
             self.unskipped += 1
 
         if self.unskipped == self.scale_window and self.dynamic:
-            self.loss_scale = min(self.max_loss_scale, self.loss_scale * self.scale_factor)
+            self.loss_scale = min(self.max_loss_scale,
+                                  self.loss_scale * self.scale_factor)
             self.unskipped = 0
+
 
 def check_overflow(val):
     return (val == float('inf')) or (val == -float('inf')) or (val != val)
+
 
 def grad_norm(params, scale, flat=False):
     params = list(params)
     if flat:
         # Faster but more memory
-        fp16_grads = [p.grad for p in params if p.grad is not None and p.data.dtype == torch.float16]
-        fp16_norm = 0.0 if len(fp16_grads) == 0 else float(_flatten_dense_tensors(fp16_grads).norm(p=2, dtype=torch.float32))
-        fp32_grads = [p.grad for p in params if p.grad is not None and p.data.dtype != torch.float16]
-        fp32_norm = 0.0 if len(fp32_grads) == 0 else float(_flatten_dense_tensors(fp32_grads).norm(p=2))
+        fp16_grads = [
+            p.grad for p in params if p.grad is not None and p.data.dtype == torch.float16]
+        fp16_norm = 0.0 if len(fp16_grads) == 0 else float(
+            _flatten_dense_tensors(fp16_grads).norm(p=2, dtype=torch.float32))
+        fp32_grads = [
+            p.grad for p in params if p.grad is not None and p.data.dtype != torch.float16]
+        fp32_norm = 0.0 if len(fp32_grads) == 0 else float(
+            _flatten_dense_tensors(fp32_grads).norm(p=2))
         grad_norm = (fp16_norm**2 + fp32_norm**2)**0.5
     else:
         # Slightly slower but less memory
@@ -119,11 +138,13 @@ def grad_norm(params, scale, flat=False):
         grad_norm = float(grad_norm**0.5)
     return grad_norm / scale
 
+
 def clipped_grad_scale(grad_norm, max_grad_norm, scale):
     clip = grad_norm / max_grad_norm
     if clip > 1:
         scale = clip * scale
     return scale
+
 
 class FP16FusedAdam(Optimizer):
     def __init__(
@@ -138,7 +159,8 @@ class FP16FusedAdam(Optimizer):
         amsgrad=False,
     ):
         if amsgrad:
-            raise RuntimeError("FusedAdam does not support the AMSGrad variant.")
+            raise RuntimeError(
+                "FusedAdam does not support the AMSGrad variant.")
         defaults = dict(
             lr=lr, bias_correction=bias_correction, betas=betas, eps=eps, weight_decay=weight_decay
         )
@@ -187,7 +209,8 @@ class FP16FusedAdam(Optimizer):
                 if p.data.dtype == torch.float16:
                     exp_avg, exp_avg_sq = (
                         state["exp_avg"].float() * state["scale_exp_avg"],
-                        state["exp_avg_sq"].float() * state["scale_exp_avg_sq"],
+                        state["exp_avg_sq"].float() *
+                        state["scale_exp_avg_sq"],
                     )
                 else:
                     exp_avg, exp_avg_sq = state["exp_avg"], state["exp_avg_sq"]
@@ -215,13 +238,17 @@ class FP16FusedAdam(Optimizer):
 
                 if p.data.dtype == torch.float16:
                     state["scale_exp_avg"] = (
-                        1e-8 + float(torch.norm(exp_avg, float("inf"))) / self.FLOAT16_MAX
+                        1e-8 + float(torch.norm(exp_avg, float("inf"))
+                                     ) / self.FLOAT16_MAX
                     )
                     state["scale_exp_avg_sq"] = (
-                        1e-8 + float(torch.norm(exp_avg_sq, float("inf"))) / self.FLOAT16_MAX
+                        1e-8 + float(torch.norm(exp_avg_sq,
+                                     float("inf"))) / self.FLOAT16_MAX
                     )
-                    state["exp_avg"] = (exp_avg / state["scale_exp_avg"]).half()
-                    state["exp_avg_sq"] = (exp_avg_sq / state["scale_exp_avg_sq"]).half()
+                    state["exp_avg"] = (
+                        exp_avg / state["scale_exp_avg"]).half()
+                    state["exp_avg_sq"] = (
+                        exp_avg_sq / state["scale_exp_avg_sq"]).half()
 
         return loss
 
@@ -239,7 +266,8 @@ class FusedAdam(Optimizer):
         amsgrad=False,
     ):
         if amsgrad:
-            raise RuntimeError("FusedAdam does not support the AMSGrad variant.")
+            raise RuntimeError(
+                "FusedAdam does not support the AMSGrad variant.")
         defaults = dict(
             lr=lr, bias_correction=bias_correction, betas=betas, eps=eps, weight_decay=weight_decay
         )
@@ -300,4 +328,3 @@ class FusedAdam(Optimizer):
                 )
 
         return loss
-

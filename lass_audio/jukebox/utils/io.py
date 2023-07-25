@@ -1,7 +1,8 @@
 import numpy as np
 import av
 import torch as t
-import jukebox.utils.dist_adapter as dist
+import lass_audio.jukebox.utils.dist_adapter as dist
+
 
 def get_duration_sec(file, cache=False):
     try:
@@ -17,13 +18,14 @@ def get_duration_sec(file, cache=False):
                 f.write(str(duration) + '\n')
         return duration
 
+
 def load_audio(file, sr, offset, duration, resample=True, approx=False, time_base='samples', check_duration=True):
     if time_base == 'sec':
         offset = offset * sr
         duration = duration * sr
     # Loads at target sr, stereo channels, seeks from offset, and stops after duration
     container = av.open(file)
-    audio = container.streams.get(audio=0)[0] # Only first audio stream
+    audio = container.streams.get(audio=0)[0]  # Only first audio stream
     audio_duration = audio.duration * float(audio.time_base)
     if approx:
         if offset + duration > audio_duration*sr:
@@ -31,21 +33,25 @@ def load_audio(file, sr, offset, duration, resample=True, approx=False, time_bas
             offset = np.min(audio_duration*sr - duration, offset - duration)
     else:
         if check_duration:
-            assert offset + duration <= audio_duration*sr, f'End {offset + duration} beyond duration {audio_duration*sr}'
+            assert offset + duration <= audio_duration * \
+                sr, f'End {offset + duration} beyond duration {audio_duration*sr}'
     if resample:
-        resampler = av.AudioResampler(format='fltp',layout='stereo', rate=sr)
+        resampler = av.AudioResampler(format='fltp', layout='stereo', rate=sr)
     else:
         assert sr == audio.sample_rate
-    offset = int(offset / sr / float(audio.time_base)) #int(offset / float(audio.time_base)) # Use units of time_base for seeking
-    duration = int(duration) #duration = int(duration * sr) # Use units of time_out ie 1/sr for returning
+    # int(offset / float(audio.time_base)) # Use units of time_base for seeking
+    offset = int(offset / sr / float(audio.time_base))
+    # duration = int(duration * sr) # Use units of time_out ie 1/sr for returning
+    duration = int(duration)
     sig = np.zeros((2, duration), dtype=np.float32)
     container.seek(offset, stream=audio)
     total_read = 0
-    for frame in container.decode(audio=0): # Only first audio stream
+    for frame in container.decode(audio=0):  # Only first audio stream
         if resample:
             frame.pts = None
             frame = resampler.resample(frame)
-        frame = frame.to_ndarray(format='fltp') # Convert to floats and not int16
+        # Convert to floats and not int16
+        frame = frame.to_ndarray(format='fltp')
         read = frame.shape[-1]
         if total_read + read > duration:
             read = duration - total_read
@@ -56,15 +62,19 @@ def load_audio(file, sr, offset, duration, resample=True, approx=False, time_bas
     assert total_read <= duration, f'Expected {duration} frames, got {total_read}'
     return sig, sr
 
+
 def test_simple_loader():
     import librosa
     from tqdm import tqdm
 
-    collate_fn = lambda batch: t.stack([t.from_numpy(b) for b in batch], dim=0)
+    def collate_fn(batch): return t.stack(
+        [t.from_numpy(b) for b in batch], dim=0)
 
     def get_batch(file, loader):
-        y1, sr = loader(file, sr=44100, offset=0.0, duration=6.0, time_base='sec')
-        y2, sr = loader(file, sr=44100, offset=20.0, duration=6.0, time_base='sec')
+        y1, sr = loader(file, sr=44100, offset=0.0,
+                        duration=6.0, time_base='sec')
+        y2, sr = loader(file, sr=44100, offset=20.0,
+                        duration=6.0, time_base='sec')
         return [y1, y2]
 
     def load(file, loader):
@@ -79,18 +89,19 @@ def test_simple_loader():
     print("Loader", loader.__name__)
     x = t.randn(2, 2).cuda()
     x = load(files[0], loader)
-    for i,file in enumerate(tqdm(files)):
+    for i, file in enumerate(tqdm(files)):
         x = load(file, loader)
         if i == 100:
             break
+
 
 def test_dataset_loader():
     from tqdm import tqdm
     from torch.utils.data import DataLoader
     from torch.utils.data.distributed import DistributedSampler
-    from jukebox.utils.audio_utils import audio_preprocess, audio_postprocess
-    from jukebox.hparams import setup_hparams
-    from jukebox.data.files_dataset import FilesAudioDataset
+    from lass_audio.jukebox.utils.audio_utils import audio_preprocess, audio_postprocess
+    from lass_audio.jukebox.hparams import setup_hparams
+    from lass_audio.jukebox.data.files_dataset import FilesAudioDataset
     hps = setup_hparams("teeny", {})
     hps.sr = 22050  # 44100
     hps.hop_length = 512
@@ -98,7 +109,7 @@ def test_dataset_loader():
     hps.channels = 2
     hps.aug_shift = False
     hps.bs = 2
-    hps.nworkers = 2 # Getting 20 it/s with 2 workers, 10 it/s with 1 worker
+    hps.nworkers = 2  # Getting 20 it/s with 2 workers, 10 it/s with 1 worker
     print(hps)
     dataset = hps.dataset
     root = hps.root
@@ -109,7 +120,7 @@ def test_dataset_loader():
     print("Length of dataset", len(dataset))
 
     # Torch Loader
-    collate_fn = lambda batch: t.stack([t.from_numpy(b) for b in batch], 0)
+    def collate_fn(batch): return t.stack([t.from_numpy(b) for b in batch], 0)
     sampler = DistributedSampler(dataset)
     train_loader = DataLoader(dataset, batch_size=hps.bs, num_workers=hps.nworkers, pin_memory=False, sampler=sampler,
                               drop_last=True, collate_fn=collate_fn)
@@ -129,8 +140,8 @@ def test_dataset_loader():
         dist.barrier()
         break
 
+
 if __name__ == '__main__':
-    from jukebox.utils.dist_utils import setup_dist_from_mpi
+    from lass_audio.jukebox.utils.dist_utils import setup_dist_from_mpi
     setup_dist_from_mpi(port=29500)
     test_dataset_loader()
-

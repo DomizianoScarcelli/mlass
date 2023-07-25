@@ -2,7 +2,8 @@ import numpy as np
 import torch as t
 import torch.nn as nn
 import torch.nn.functional as F
-import jukebox.utils.dist_adapter as dist
+import lass_audio.jukebox.utils.dist_adapter as dist
+
 
 class BottleneckBlock(nn.Module):
     def __init__(self, k_bins, emb_width, mu):
@@ -56,7 +57,8 @@ class BottleneckBlock(nn.Module):
         mu, emb_width, k_bins = self.mu, self.emb_width, self.k_bins
         with t.no_grad():
             # Calculate new centres
-            x_l_onehot = t.zeros(k_bins, x.shape[0], device=x.device)  # k_bins, N * L
+            x_l_onehot = t.zeros(
+                k_bins, x.shape[0], device=x.device)  # k_bins, N * L
             x_l_onehot.scatter_(0, x_l.view(1, x.shape[0]), 1)
 
             _k_sum = t.matmul(x_l_onehot, x)  # k_bins, w
@@ -74,9 +76,11 @@ class BottleneckBlock(nn.Module):
             self.k_elem = mu * self.k_elem + (1. - mu) * _k_elem  # k_bins
             usage = (self.k_elem.view(k_bins, 1) >= self.threshold).float()
             self.k = usage * (self.k_sum.view(k_bins, emb_width) / self.k_elem.view(k_bins, 1)) \
-                     + (1 - usage) * _k_rand
-            _k_prob = _k_elem / t.sum(_k_elem)  # x_l_onehot.mean(dim=-1)  # prob of each bin
-            entropy = -t.sum(_k_prob * t.log(_k_prob + 1e-8))  # entropy ie how diverse
+                + (1 - usage) * _k_rand
+            # x_l_onehot.mean(dim=-1)  # prob of each bin
+            _k_prob = _k_elem / t.sum(_k_elem)
+            entropy = -t.sum(_k_prob * t.log(_k_prob + 1e-8)
+                             )  # entropy ie how diverse
             used_curr = (_k_elem >= self.threshold).sum()
             usage = t.sum(usage)
             dk = t.norm(self.k - old_k) / np.sqrt(np.prod(old_k.shape))
@@ -93,8 +97,9 @@ class BottleneckBlock(nn.Module):
         if x.shape[-1] == self.emb_width:
             prenorm = t.norm(x - t.mean(x)) / np.sqrt(np.prod(x.shape))
         elif x.shape[-1] == 2 * self.emb_width:
-            x1, x2 = x[...,:self.emb_width], x[...,self.emb_width:]
-            prenorm = (t.norm(x1 - t.mean(x1)) / np.sqrt(np.prod(x1.shape))) + (t.norm(x2 - t.mean(x2)) / np.sqrt(np.prod(x2.shape)))
+            x1, x2 = x[..., :self.emb_width], x[..., self.emb_width:]
+            prenorm = (t.norm(x1 - t.mean(x1)) / np.sqrt(np.prod(x1.shape))) + \
+                (t.norm(x2 - t.mean(x2)) / np.sqrt(np.prod(x2.shape)))
 
             # Normalise
             x = x1 + x2
@@ -113,7 +118,7 @@ class BottleneckBlock(nn.Module):
         # Calculate latent code x_l
         k_w = self.k.t()
         distance = t.sum(x ** 2, dim=-1, keepdim=True) - 2 * t.matmul(x, k_w) + t.sum(k_w ** 2, dim=0,
-                                                                                            keepdim=True)  # (N * L, b)
+                                                                                      keepdim=True)  # (N * L, b)
         min_distance, x_l = t.min(distance, dim=-1)
         fit = t.mean(min_distance)
         return x_l, fit
@@ -173,7 +178,7 @@ class BottleneckBlock(nn.Module):
         x_d = x + (x_d - x).detach()
 
         # Postprocess
-        x_l, x_d = self.postprocess(x_l, x_d, (N,T))
+        x_l, x_d = self.postprocess(x_l, x_d, (N, T))
         return x_l, x_d, commit_loss, dict(fit=fit,
                                            pn=prenorm,
                                            **update_metrics)
@@ -183,19 +188,21 @@ class Bottleneck(nn.Module):
     def __init__(self, l_bins, emb_width, mu, levels):
         super().__init__()
         self.levels = levels
-        level_block = lambda level: BottleneckBlock(l_bins, emb_width, mu)
+        def level_block(level): return BottleneckBlock(l_bins, emb_width, mu)
         self.level_blocks = nn.ModuleList()
         for level in range(self.levels):
             self.level_blocks.append(level_block(level))
 
     def encode(self, xs):
-        zs = [level_block.encode(x) for (level_block, x) in zip(self.level_blocks, xs)]
+        zs = [level_block.encode(x) for (level_block, x)
+              in zip(self.level_blocks, xs)]
         return zs
 
     def decode(self, zs, start_level=0, end_level=None):
         if end_level is None:
             end_level = self.levels
-        xs_quantised = [level_block.decode(z) for (level_block, z) in zip(self.level_blocks[start_level:end_level], zs)]
+        xs_quantised = [level_block.decode(z) for (level_block, z) in zip(
+            self.level_blocks[start_level:end_level], zs)]
         return xs_quantised
 
     def forward(self, xs):
@@ -203,7 +210,8 @@ class Bottleneck(nn.Module):
         for level in range(self.levels):
             level_block = self.level_blocks[level]
             x = xs[level]
-            z, x_quantised, commit_loss, metric = level_block(x, update_k=self.training)
+            z, x_quantised, commit_loss, metric = level_block(
+                x, update_k=self.training)
             zs.append(z)
             if not self.training:
                 # Be extra paranoid and make sure the encoder weights can't
@@ -215,9 +223,11 @@ class Bottleneck(nn.Module):
                 metrics.append(metric)
         return zs, xs_quantised, commit_losses, metrics
 
+
 class NoBottleneckBlock(nn.Module):
     def restore_k(self):
         pass
+
 
 class NoBottleneck(nn.Module):
     def __init__(self, levels):
@@ -238,11 +248,13 @@ class NoBottleneck(nn.Module):
     def forward(self, xs):
         zero = t.zeros(()).cuda()
         commit_losses = [zero for _ in range(self.levels)]
-        metrics = [dict(entropy=zero, usage=zero, used_curr=zero, pn=zero, dk=zero) for _ in range(self.levels)]
+        metrics = [dict(entropy=zero, usage=zero, used_curr=zero,
+                        pn=zero, dk=zero) for _ in range(self.levels)]
         return xs, xs, commit_losses, metrics
 
+
 if __name__ == '__main__':
-    from jukebox.utils.dist_utils import setup_dist_from_mpi
+    from lass_audio.jukebox.utils.dist_utils import setup_dist_from_mpi
     rank, local_rank, device = setup_dist_from_mpi(port=29600)
     bottleneck = Bottleneck(256, 64, 0.99, 2).to(device)
     bottleneck.check()

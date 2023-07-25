@@ -12,12 +12,12 @@ from diba.diba import Likelihood
 from torch.utils.data import DataLoader
 from diba.diba.interfaces import SeparationPrior
 
-from lass.datasets import SeparationDataset
-from lass.datasets import SeparationSubset
-from lass.diba_interfaces import JukeboxPrior, SparseLikelihood
-from lass.utils import assert_is_audio, decode_latent_codes, get_dataset_subsample, get_raw_to_tokens, setup_priors, setup_vqvae
-from lass.datasets import ChunkedPairsDataset
-from jukebox.utils.dist_utils import setup_dist_from_mpi
+from lass_audio.jukebox.utils.dist_utils import setup_dist_from_mpi
+from lass_audio.lass.datasets import SeparationDataset
+from lass_audio.lass.datasets import SeparationSubset
+from lass_audio.lass.diba_interfaces import JukeboxPrior, SparseLikelihood
+from lass_audio.lass.utils import assert_is_audio, decode_latent_codes, get_dataset_subsample, get_raw_to_tokens, setup_priors, setup_vqvae
+from lass_audio.lass.datasets import ChunkedPairsDataset
 
 
 audio_root = Path(__file__).parent.parent

@@ -6,10 +6,10 @@ import numpy as np
 import torch
 import torchaudio
 
-from jukebox.hparams import setup_hparams
-from jukebox.make_models import make_vqvae, make_prior
+from lass_audio.jukebox.hparams import setup_hparams
+from lass_audio.jukebox.make_models import make_vqvae, make_prior
 
-from jukebox.vqvae.vqvae import calculate_strides, VQVAE
+from lass_audio.jukebox.vqvae.vqvae import calculate_strides, VQVAE
 
 
 SCRIPT_DIRECTORY = Path(__file__).parent
@@ -29,7 +29,8 @@ def load_audio(
     assert audio.time_base.numerator == 1
 
     audio_layout = av.AudioLayout(audio_layout)
-    resampler = av.AudioResampler(format="fltp", layout=audio_layout, rate=sample_rate)
+    resampler = av.AudioResampler(
+        format="fltp", layout=audio_layout, rate=sample_rate)
     sig = np.zeros(
         (
             len(audio_layout.channels),
@@ -42,7 +43,7 @@ def load_audio(
     for frame in container.decode(audio=0):  # Only first audio stream
         frame_data = resampler.resample(frame).to_ndarray()
         read = frame_data.shape[-1]
-        sig[:, total_read : total_read + read] = frame_data
+        sig[:, total_read: total_read + read] = frame_data
         total_read += read
 
     sig = sig[:total_read]
@@ -53,7 +54,8 @@ def save_audio(
     signal: torch.Tensor, filename: Union[str, Path], sample_rate: int,
 ):
     assert len(signal.shape) == 2
-    torchaudio.save(src=signal, filepath=str(filename), sample_rate=sample_rate)
+    torchaudio.save(src=signal, filepath=str(
+        filename), sample_rate=sample_rate)
 
 
 def is_silent(signal: torch.Tensor, silence_threshold: float = 1.5e-5) -> bool:
@@ -74,12 +76,13 @@ def get_nonsilent_chunks(
     assert track_1_samples == track_2_samples
 
     num_samples = min(track_1_samples, track_2_samples)
-    num_chunks = num_samples // max_chunk_size + int(num_samples % max_chunk_size != 0)
+    num_chunks = num_samples // max_chunk_size + \
+        int(num_samples % max_chunk_size != 0)
 
     available_chunks = []
     for i in range(num_chunks):
-        m1 = track_1[:, i * max_chunk_size : (i + 1) * max_chunk_size]
-        m2 = track_2[:, i * max_chunk_size : (i + 1) * max_chunk_size]
+        m1 = track_1[:, i * max_chunk_size: (i + 1) * max_chunk_size]
+        m2 = track_2[:, i * max_chunk_size: (i + 1) * max_chunk_size]
 
         _, m1_samples = m1.shape
         _, m2_samples = m2.shape
@@ -97,8 +100,10 @@ def get_nonsilent_chunks(
 def load_audio_tracks(
     path_1: Union[str, Path], path_2: Union[str, Path], sample_rate: int
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    signal_0, sr_0 = load_audio(path_1, sample_rate=sample_rate, audio_layout="mono")
-    signal_1, sr_1 = load_audio(path_2, sample_rate=sample_rate, audio_layout="mono")
+    signal_0, sr_0 = load_audio(
+        path_1, sample_rate=sample_rate, audio_layout="mono")
+    signal_1, sr_1 = load_audio(
+        path_2, sample_rate=sample_rate, audio_layout="mono")
     signal_0 = torch.from_numpy(signal_0)
     signal_1 = torch.from_numpy(signal_1)
     assert sr_0 == sr_1 == sample_rate
@@ -119,7 +124,8 @@ def setup_vqvae(
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
 ):
     # construct vqvae
-    hps = setup_hparams(vqvae_type, dict(sr=sample_rate, restore_vqvae=str(vqvae_path)))
+    hps = setup_hparams(vqvae_type, dict(
+        sr=sample_rate, restore_vqvae=str(vqvae_path)))
     raw_to_tokens = get_raw_to_tokens(hps.strides_t, hps.downs_t)
     hps.sample_length = sample_tokens * raw_to_tokens
     return make_vqvae(hps, device)
@@ -163,7 +169,7 @@ def get_raw_to_tokens(
     return np.prod(calculate_strides(strides_t, downs_t)[: level + 1])
 
 
-def decode_latents(vqvae: VQVAE, z: torch.Tensor, level:int):
+def decode_latents(vqvae: VQVAE, z: torch.Tensor, level: int):
     x = vqvae.decoders[level]([z], all_levels=False)
     return vqvae.postprocess(x)
 

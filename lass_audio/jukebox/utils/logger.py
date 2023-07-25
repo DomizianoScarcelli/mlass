@@ -1,18 +1,21 @@
 import torch as t
-import jukebox.utils.dist_adapter as dist
+import lass_audio.jukebox.utils.dist_adapter as dist
 from tqdm import tqdm
 from datetime import date
 import os
 import sys
 
+
 def def_tqdm(x):
     return tqdm(x, leave=True, file=sys.stdout, bar_format="{n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]")
+
 
 def get_range(x):
     if dist.get_rank() == 0:
         return def_tqdm(x)
     else:
         return x
+
 
 def init_logging(hps, local_rank, rank):
     logdir = f"{hps.local_logdir}/{hps.name}"
@@ -27,11 +30,13 @@ def init_logging(hps, local_rank, rank):
     logger.add_text('hps', str(hps))
     return logger, metrics
 
+
 def get_name(hps):
     name = ""
     for key, value in hps.items():
         name += f"{key}_{value}_"
     return name
+
 
 def average_metrics(_metrics):
     metrics = {}
@@ -41,6 +46,7 @@ def average_metrics(_metrics):
                 metrics[key] = []
             metrics[key].append(val)
     return {key: sum(vals)/len(vals) for key, vals in metrics.items()}
+
 
 class Metrics:
     def __init__(self):
@@ -70,6 +76,7 @@ class Metrics:
         self.sum = {}
         self.n = {}
 
+
 class Logger:
     def __init__(self, logdir, rank):
         if rank == 0:
@@ -95,9 +102,11 @@ class Logger:
         if self.rank == 0:
             for i in range(min(len(auds), max_log)):
                 if max_len:
-                    self.sw.add_audio(f"{i}/{tag}", auds[i][:max_len * sample_rate], self.iters, sample_rate)
+                    self.sw.add_audio(
+                        f"{i}/{tag}", auds[i][:max_len * sample_rate], self.iters, sample_rate)
                 else:
-                    self.sw.add_audio(f"{i}/{tag}", auds[i], self.iters, sample_rate)
+                    self.sw.add_audio(
+                        f"{i}/{tag}", auds[i], self.iters, sample_rate)
 
     def add_audio(self, tag, aud, sample_rate=22050):
         if self.rank == 0:
