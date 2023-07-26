@@ -52,8 +52,8 @@ class TestFP16Model(unittest.TestCase):
         self.C_in = 3
         self.H_in = 16
         self.W_in = 32
-        self.in_tensor = torch.randn((self.N, self.C_in, self.H_in, self.W_in)).cuda()
-        self.orig_model = DummyNetWrapper().cuda()
+        self.in_tensor = torch.randn((self.N, self.C_in, self.H_in, self.W_in))
+        self.orig_model = DummyNetWrapper()
         self.fp16_model = FP16Model(self.orig_model)
 
     def test_params_and_buffers(self):
@@ -63,7 +63,8 @@ class TestFP16Model(unittest.TestCase):
             self.fp16_model.network.dn.db2.bn,
         ]
         for m in self.fp16_model.modules():
-            expected_dtype = torch.float if (m in exempted_modules) else torch.half
+            expected_dtype = torch.float if (
+                m in exempted_modules) else torch.half
             for p in m.parameters(recurse=False):
                 assert p.dtype == expected_dtype
             for b in m.buffers(recurse=False):
@@ -72,4 +73,3 @@ class TestFP16Model(unittest.TestCase):
     def test_output_is_half(self):
         out_tensor = self.fp16_model(self.in_tensor)
         assert out_tensor.dtype == torch.half
-

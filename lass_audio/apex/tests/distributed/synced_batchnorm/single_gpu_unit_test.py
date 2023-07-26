@@ -60,7 +60,7 @@ eps = 1e-5
 mean, var_biased = syncbn.welford_mean_var(inp_t)
 inv_std = 1.0 / torch.sqrt(var_biased + eps)
 
-bn = torch.nn.BatchNorm2d(feature_size).cuda()
+bn = torch.nn.BatchNorm2d(feature_size)
 bn.momentum = 1.0
 bn.weight.data = weight_t.clone()
 bn.bias.data = bias_t.clone()
@@ -69,7 +69,7 @@ grad_bn = grad_output_t.clone().detach()
 out_bn = bn(inp_bn)
 out_bn.backward(grad_bn)
 
-sbn = apex.parallel.SyncBatchNorm(feature_size).cuda()
+sbn = apex.parallel.SyncBatchNorm(feature_size)
 sbn.momentum = 1.0
 sbn.weight.data = weight_t.clone()
 sbn.bias.data = bias_t.clone()
@@ -78,7 +78,7 @@ grad_sbn = grad_output_t.clone().detach()
 out_sbn = sbn(inp_sbn)
 out_sbn.backward(grad_sbn)
 
-sbn_c_last = apex.parallel.SyncBatchNorm(feature_size, channel_last=True).cuda()
+sbn_c_last = apex.parallel.SyncBatchNorm(feature_size, channel_last=True)
 sbn_c_last.momentum = 1.0
 sbn_c_last.weight.data = weight_t.clone()
 sbn_c_last.bias.data = bias_t.clone()

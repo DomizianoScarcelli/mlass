@@ -103,7 +103,7 @@ def _sample(zs, labels, sampling_kwargs, priors, sample_levels, hps):
     alignments = None
     for level in reversed(sample_levels):
         prior = priors[level]
-        prior.cuda()
+        prior
         empty_cache()
 
         # Set correct total_length, hop_length, labels and sampling_kwargs for level
@@ -193,7 +193,7 @@ def load_prompts(audio_files, duration, hps):
 
 def load_codes(codes_file, duration, priors, hps):
     data = t.load(codes_file, map_location='cpu')
-    zs = [z.cuda() for z in data['zs']]
+    zs = [z for z in data['zs']]
     assert zs[-1].shape[0] == hps.n_samples, f"Expected bs = {hps.n_samples}, got {zs[-1].shape[0]}"
     del data
     if duration is not None:

@@ -123,7 +123,7 @@ def log_inputs(orig_model, logger, x_in, y, x_out, hps, tag="train"):
     if hps.prior:
         if hps.labels:
             log_labels(logger, orig_model.labeller,
-                       f'{tag}_y_in', allgather(y.cuda()), hps)
+                       f'{tag}_y_in', allgather(y), hps)
     else:
         zs_in = orig_model.encode(x_in, start_level=0, bs_chunks=bs)
         x_ds = [orig_model.decode(
@@ -164,7 +164,7 @@ def sample_prior(orig_model, ema, logger, x_in, y, hps):
     log_aud(logger, 'sample_x_T1', x_sample, hps)
     if hps.prior and hps.labels:
         log_labels(logger, orig_model.labeller,
-                   f'sample_x_T1', allgather(y.cuda()), hps)
+                   f'sample_x_T1', allgather(y), hps)
 
     # Recons
     for i in range(len(x_ds)):

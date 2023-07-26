@@ -34,7 +34,7 @@ override the defaults established by the ``opt_level``.
 Example::
 
         # Declare model and optimizer as usual, with default (FP32) precision
-        model = torch.nn.Linear(D_in, D_out).cuda()
+        model = torch.nn.Linear(D_in, D_out)
         optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
 
         # Allow Amp to perform casts as required by the opt_level

@@ -23,7 +23,8 @@ try:
     from apex import amp, optimizers
     from apex.multi_tensor_apply import multi_tensor_applier
 except ImportError:
-    raise ImportError("Please install apex from https://www.github.com/nvidia/apex to run this example.")
+    raise ImportError(
+        "Please install apex from https://www.github.com/nvidia/apex to run this example.")
 
 model_names = sorted(name for name in models.__dict__
                      if name.islower() and not name.startswith("__")
@@ -78,31 +79,34 @@ parser.add_argument('--prints-to-process', type=int, default=10)
 
 cudnn.benchmark = True
 
+
 def fast_collate(batch):
     imgs = [img[0] for img in batch]
     targets = torch.tensor([target[1] for target in batch], dtype=torch.int64)
     w = imgs[0].size[0]
     h = imgs[0].size[1]
-    tensor = torch.zeros( (len(imgs), 3, h, w), dtype=torch.uint8 )
+    tensor = torch.zeros((len(imgs), 3, h, w), dtype=torch.uint8)
     for i, img in enumerate(imgs):
         nump_array = np.asarray(img, dtype=np.uint8)
-        if(nump_array.ndim < 3):
+        if (nump_array.ndim < 3):
             nump_array = np.expand_dims(nump_array, axis=-1)
         nump_array = np.rollaxis(nump_array, 2)
 
         tensor[i] += torch.from_numpy(nump_array)
-        
+
     return tensor, targets
+
 
 best_prec1 = 0
 args = parser.parse_args()
 
 # Let multi_tensor_applier be the canary in the coalmine
 # that verifies if the backend is what we think it is
-assert multi_tensor_applier.available == args.has_ext 
+assert multi_tensor_applier.available == args.has_ext
 
 print("opt_level = {}".format(args.opt_level))
-print("keep_batchnorm_fp32 = {}".format(args.keep_batchnorm_fp32), type(args.keep_batchnorm_fp32))
+print("keep_batchnorm_fp32 = {}".format(
+    args.keep_batchnorm_fp32), type(args.keep_batchnorm_fp32))
 print("loss_scale = {}".format(args.loss_scale), type(args.loss_scale))
 
 
@@ -113,6 +117,7 @@ if args.deterministic:
     cudnn.deterministic = True
     torch.manual_seed(args.local_rank)
     torch.set_printoptions(precision=10)
+
 
 def main():
     global best_prec1, args
@@ -127,7 +132,7 @@ def main():
     if args.distributed:
         args.gpu = args.local_rank % torch.cuda.device_count()
         torch.cuda.set_device(args.gpu)
-        torch.distributed.init_process_group(backend='nccl',
+        torch.distributed.init_process_group(backend='gloo',
                                              init_method='env://')
         args.world_size = torch.distributed.get_world_size()
 
@@ -146,10 +151,10 @@ def main():
         print("using apex synced BN")
         model = apex.parallel.convert_syncbn_model(model)
 
-    model = model.cuda()
+    model = model
 
     # Scale learning rate based on global batch size
-    args.lr = args.lr*float(args.batch_size*args.world_size)/256. 
+    args.lr = args.lr*float(args.batch_size*args.world_size)/256.
     if args.fused_adam:
         optimizer = optimizers.FusedAdam(model.parameters())
     else:
@@ -163,17 +168,17 @@ def main():
         opt_level=args.opt_level,
         keep_batchnorm_fp32=args.keep_batchnorm_fp32,
         loss_scale=args.loss_scale
-        )
+    )
 
     if args.distributed:
-        # By default, apex.parallel.DistributedDataParallel overlaps communication with 
+        # By default, apex.parallel.DistributedDataParallel overlaps communication with
         # computation in the backward pass.
         # model = DDP(model)
         # delay_allreduce delays all communication to the end of the backward pass.
         model = DDP(model, delay_allreduce=True)
 
     # define loss function (criterion) and optimizer
-    criterion = nn.CrossEntropyLoss().cuda()
+    criterion = nn.CrossEntropyLoss()
 
     # Optionally resume from a checkpoint
     if args.resume:
@@ -181,7 +186,8 @@ def main():
         def resume():
             if os.path.isfile(args.resume):
                 print("=> loading checkpoint '{}'".format(args.resume))
-                checkpoint = torch.load(args.resume, map_location = lambda storage, loc: storage.cuda(args.gpu))
+                checkpoint = torch.load(
+                    args.resume, map_location=lambda storage, loc: storage.cuda(args.gpu))
                 args.start_epoch = checkpoint['epoch']
                 best_prec1 = checkpoint['best_prec1']
                 model.load_state_dict(checkpoint['state_dict'])
@@ -196,9 +202,9 @@ def main():
     traindir = os.path.join(args.data, 'train')
     valdir = os.path.join(args.data, 'val')
 
-    if(args.arch == "inception_v3"):
+    if (args.arch == "inception_v3"):
         crop_size = 299
-        val_size = 320 # I chose this value arbitrarily, we can adjust.
+        val_size = 320  # I chose this value arbitrarily, we can adjust.
     else:
         crop_size = 224
         val_size = 256
@@ -212,18 +218,21 @@ def main():
             # normalize,
         ]))
     val_dataset = datasets.ImageFolder(valdir, transforms.Compose([
-            transforms.Resize(val_size),
-            transforms.CenterCrop(crop_size),
-        ]))
+        transforms.Resize(val_size),
+        transforms.CenterCrop(crop_size),
+    ]))
 
     train_sampler = None
     val_sampler = None
     if args.distributed:
-        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
-        val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
+        train_sampler = torch.utils.data.distributed.DistributedSampler(
+            train_dataset)
+        val_sampler = torch.utils.data.distributed.DistributedSampler(
+            val_dataset)
 
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
+        train_dataset, batch_size=args.batch_size, shuffle=(
+            train_sampler is None),
         num_workers=args.workers, pin_memory=True, sampler=train_sampler, collate_fn=fast_collate)
 
     val_loader = torch.utils.data.DataLoader(
@@ -257,15 +266,18 @@ def main():
                 'arch': args.arch,
                 'state_dict': model.state_dict(),
                 'best_prec1': best_prec1,
-                'optimizer' : optimizer.state_dict(),
+                'optimizer': optimizer.state_dict(),
             }, is_best)
+
 
 class data_prefetcher():
     def __init__(self, loader):
         self.loader = iter(loader)
         self.stream = torch.cuda.Stream()
-        self.mean = torch.tensor([0.485 * 255, 0.456 * 255, 0.406 * 255]).cuda().view(1,3,1,1)
-        self.std = torch.tensor([0.229 * 255, 0.224 * 255, 0.225 * 255]).cuda().view(1,3,1,1)
+        self.mean = torch.tensor(
+            [0.485 * 255, 0.456 * 255, 0.406 * 255]).view(1, 3, 1, 1)
+        self.std = torch.tensor(
+            [0.229 * 255, 0.224 * 255, 0.225 * 255]).view(1, 3, 1, 1)
         # With Amp, it isn't necessary to manually convert data to half.
         # if args.fp16:
         #     self.mean = self.mean.half()
@@ -288,7 +300,7 @@ class data_prefetcher():
             # else:
             self.next_input = self.next_input.float()
             self.next_input = self.next_input.sub_(self.mean).div_(self.std)
-            
+
     def next(self):
         torch.cuda.current_stream().wait_stream(self.stream)
         input = self.next_input
@@ -308,9 +320,9 @@ def train(train_loader, model, criterion, optimizer, epoch):
     model.train()
     end = time.time()
 
-    run_info_dict = {"Iteration" : [],
-                     "Loss" : [],
-                     "Speed" : []}
+    run_info_dict = {"Iteration": [],
+                     "Loss": [],
+                     "Speed": []}
 
     prefetcher = data_prefetcher(train_loader)
     input, target = prefetcher.next()
@@ -378,14 +390,15 @@ def train(train_loader, model, criterion, optimizer, epoch):
                       'Loss {loss.val:.10f} ({loss.avg:.4f})\t'
                       'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
                       'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
-                       epoch, i, len(train_loader),
-                       args.world_size * args.batch_size / batch_time.val,
-                       args.world_size * args.batch_size / batch_time.avg,
-                       batch_time=batch_time,
-                       data_time=data_time, loss=losses, top1=top1, top5=top5))
+                          epoch, i, len(train_loader),
+                          args.world_size * args.batch_size / batch_time.val,
+                          args.world_size * args.batch_size / batch_time.avg,
+                          batch_time=batch_time,
+                          data_time=data_time, loss=losses, top1=top1, top5=top5))
             run_info_dict["Iteration"].append(i)
             run_info_dict["Loss"].append(losses.val)
-            run_info_dict["Speed"].append(args.world_size * args.batch_size / batch_time.val)
+            run_info_dict["Speed"].append(
+                args.world_size * args.batch_size / batch_time.val)
             if len(run_info_dict["Loss"]) == args.prints_to_process:
                 if args.local_rank == 0:
                     torch.save(run_info_dict,
@@ -442,11 +455,11 @@ def validate(val_loader, model, criterion):
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                   'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
                   'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
-                   i, len(val_loader),
-                   args.world_size * args.batch_size / batch_time.val,
-                   args.world_size * args.batch_size / batch_time.avg,
-                   batch_time=batch_time, loss=losses,
-                   top1=top1, top5=top5))
+                      i, len(val_loader),
+                      args.world_size * args.batch_size / batch_time.val,
+                      args.world_size * args.batch_size / batch_time.avg,
+                      batch_time=batch_time, loss=losses,
+                      top1=top1, top5=top5))
 
         input, target = prefetcher.next()
 
@@ -464,6 +477,7 @@ def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
+
     def __init__(self):
         self.reset()
 
@@ -521,6 +535,7 @@ def reduce_tensor(tensor):
     dist.all_reduce(rt, op=dist.reduce_op.SUM)
     rt /= args.world_size
     return rt
+
 
 if __name__ == '__main__':
     main()

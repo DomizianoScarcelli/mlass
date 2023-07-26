@@ -2,6 +2,7 @@ import unittest
 import torch
 import apex
 
+
 class TestFP16Optimizer(unittest.TestCase):
     def setUp(self, max_abs_diff=1e-3, max_rel_diff=1, iters=7):
         self.max_abs_diff = max_abs_diff
@@ -14,9 +15,9 @@ class TestFP16Optimizer(unittest.TestCase):
         self.D_in = D_in
         self.D_out = D_out
         self.x = torch.randn((N, D_in), dtype=torch.float16, device='cuda')
-        self.ref_model = torch.nn.Linear(D_in, D_out).cuda().half()
-        self.tst_model = torch.nn.Linear(D_in, D_out).cuda().half()
-        for p,q in zip(self.tst_model.parameters(), self.ref_model.parameters()):
+        self.ref_model = torch.nn.Linear(D_in, D_out).half()
+        self.tst_model = torch.nn.Linear(D_in, D_out).half()
+        for p, q in zip(self.tst_model.parameters(), self.ref_model.parameters()):
             p.data.copy_(q.data)
 
     def get_max_diff(self, ref_param, tst_param):
@@ -25,8 +26,10 @@ class TestFP16Optimizer(unittest.TestCase):
             max_abs_diff_p = (p_ref - p_tst).abs().max().item()
             max_rel_diff_p = ((p_ref - p_tst) / p_ref).abs().max().item()
 
-            if max_abs_diff_p > max_abs_diff:  max_abs_diff = max_abs_diff_p
-            if max_rel_diff_p > max_rel_diff:  max_rel_diff = max_rel_diff_p
+            if max_abs_diff_p > max_abs_diff:
+                max_abs_diff = max_abs_diff_p
+            if max_rel_diff_p > max_rel_diff:
+                max_rel_diff = max_rel_diff_p
 
         return max_abs_diff, max_rel_diff
 
@@ -47,18 +50,20 @@ class TestFP16Optimizer(unittest.TestCase):
             tst_optim.backward(tst_loss)
             tst_optim.step()
 
-            max_abs_diff, max_rel_diff = self.get_max_diff(self.ref_model.parameters(), self.tst_model.parameters())
+            max_abs_diff, max_rel_diff = self.get_max_diff(
+                self.ref_model.parameters(), self.tst_model.parameters())
             self.assertLessEqual(max_abs_diff, self.max_abs_diff)
             self.assertLessEqual(max_rel_diff, self.max_rel_diff)
-
 
     def test_loss_scaling(self):
 
         ref_optim = torch.optim.Adam(self.ref_model.parameters())
-        ref_optim = apex.fp16_utils.FP16_Optimizer(ref_optim, static_loss_scale=128.0, verbose=False)
+        ref_optim = apex.fp16_utils.FP16_Optimizer(
+            ref_optim, static_loss_scale=128.0, verbose=False)
 
         tst_optim = apex.optimizers.FusedAdam(self.tst_model.parameters())
-        tst_optim = apex.optimizers.FP16_Optimizer(tst_optim, static_loss_scale=128.0)
+        tst_optim = apex.optimizers.FP16_Optimizer(
+            tst_optim, static_loss_scale=128.0)
 
         for i in range(self.iters):
             ref_loss = self.ref_model(self.x).sum()
@@ -69,17 +74,20 @@ class TestFP16Optimizer(unittest.TestCase):
             tst_optim.backward(tst_loss)
             tst_optim.step()
 
-            max_abs_diff, max_rel_diff = self.get_max_diff(self.ref_model.parameters(), self.tst_model.parameters())
+            max_abs_diff, max_rel_diff = self.get_max_diff(
+                self.ref_model.parameters(), self.tst_model.parameters())
             self.assertLessEqual(max_abs_diff, self.max_abs_diff)
             self.assertLessEqual(max_rel_diff, self.max_rel_diff)
 
     def test_parameter_groups(self):
 
-        ref_groups = [{'params': [self.ref_model.weight]},{'params': [self.ref_model.bias]}]
+        ref_groups = [{'params': [self.ref_model.weight]},
+                      {'params': [self.ref_model.bias]}]
         ref_optim = torch.optim.Adam(ref_groups)
         ref_optim = apex.fp16_utils.FP16_Optimizer(ref_optim, verbose=False)
 
-        tst_groups = [{'params': [self.tst_model.weight]},{'params': [self.tst_model.bias]}]
+        tst_groups = [{'params': [self.tst_model.weight]},
+                      {'params': [self.tst_model.bias]}]
         tst_optim = apex.optimizers.FusedAdam(tst_groups)
         tst_optim = apex.optimizers.FP16_Optimizer(tst_optim)
 
@@ -92,7 +100,8 @@ class TestFP16Optimizer(unittest.TestCase):
             tst_optim.backward(tst_loss)
             tst_optim.step()
 
-            max_abs_diff, max_rel_diff = self.get_max_diff(self.ref_model.parameters(), self.tst_model.parameters())
+            max_abs_diff, max_rel_diff = self.get_max_diff(
+                self.ref_model.parameters(), self.tst_model.parameters())
             self.assertLessEqual(max_abs_diff, self.max_abs_diff)
             self.assertLessEqual(max_rel_diff, self.max_rel_diff)
 
@@ -100,7 +109,8 @@ class TestFP16Optimizer(unittest.TestCase):
         ref_optim = torch.optim.Adam(self.ref_model.parameters())
         ref_optim = apex.fp16_utils.FP16_Optimizer(ref_optim, verbose=False)
 
-        tst_optim = apex.optimizers.FusedAdam(self.tst_model.parameters(), max_grad_norm=0.01)
+        tst_optim = apex.optimizers.FusedAdam(
+            self.tst_model.parameters(), max_grad_norm=0.01)
         tst_optim = apex.optimizers.FP16_Optimizer(tst_optim)
 
         for i in range(self.iters):
@@ -113,7 +123,8 @@ class TestFP16Optimizer(unittest.TestCase):
             tst_optim.backward(tst_loss)
             tst_optim.step()
 
-            max_abs_diff, max_rel_diff = self.get_max_diff(self.ref_model.parameters(), self.tst_model.parameters())
+            max_abs_diff, max_rel_diff = self.get_max_diff(
+                self.ref_model.parameters(), self.tst_model.parameters())
             self.assertLessEqual(max_abs_diff, self.max_abs_diff)
             self.assertLessEqual(max_rel_diff, self.max_rel_diff)
 
@@ -128,6 +139,7 @@ class TestFP16Optimizer(unittest.TestCase):
     @unittest.skip('Not support empty parameter groups')
     def test_group_empty(self):
         self.fail()
+
 
 if __name__ == '__main__':
     script_path = os.path.dirname(os.path.realpath(__file__))

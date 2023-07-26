@@ -1,3 +1,4 @@
+from apex.parallel import DistributedDataParallel as DDP
 import torch
 import numpy as np
 import apex
@@ -6,10 +7,11 @@ import os
 import argparse
 import torch.optim as optim
 
+
 def compare(desc, inp1, inp2, error):
     a = inp1.clone().detach().cpu().numpy()
     b = inp2.clone().detach().cpu().numpy()
-    close = np.allclose(a,b, error, error)
+    close = np.allclose(a, b, error, error)
     if not close:
         print(desc, close)
         z = a - b
@@ -19,12 +21,12 @@ def compare(desc, inp1, inp2, error):
         print("inp2   : ", b[index])
     return close
 
+
 feature_size = 10
 space_size = 40
 batch_size = 32
 
 
-from apex.parallel import DistributedDataParallel as DDP
 parser = argparse.ArgumentParser()
 parser.add_argument("--local_rank", default=0, type=int)
 parser.add_argument("--fp16", action='store_true', default=False)
@@ -39,10 +41,10 @@ except:
     exit(1)
 
 torch.cuda.set_device(args.local_rank)
-torch.distributed.init_process_group(backend='nccl', init_method='env://')
+torch.distributed.init_process_group(backend='gloo', init_method='env://')
 
-start = (args.local_rank%args.group_size) * batch_size//args.group_size
-finish = (args.local_rank%args.group_size + 1) * batch_size//args.group_size
+start = (args.local_rank % args.group_size) * batch_size//args.group_size
+finish = (args.local_rank % args.group_size + 1) * batch_size//args.group_size
 
 error = 1e-5
 dtype = np.float32
@@ -56,8 +58,10 @@ elif args.fp64:
 
 np.random.seed(18 + args.local_rank//args.group_size)
 
-inp = np.random.randn(batch_size, feature_size, space_size, space_size).astype(dtype)
-grad = np.random.randn(batch_size, feature_size, space_size, space_size).astype(dtype)
+inp = np.random.randn(batch_size, feature_size,
+                      space_size, space_size).astype(dtype)
+grad = np.random.randn(batch_size, feature_size,
+                       space_size, space_size).astype(dtype)
 weight = np.random.randn(feature_size).astype(dtype)
 bias = np.random.randn(feature_size).astype(dtype)
 
@@ -90,7 +94,7 @@ eps = 1e-5
 mean, var_biased = syncbn.welford_mean_var(inp_t)
 inv_std = 1.0 / torch.sqrt(var_biased + eps)
 
-bn = torch.nn.BatchNorm2d(feature_size).cuda()
+bn = torch.nn.BatchNorm2d(feature_size)
 bn.momentum = 1.0
 bn.weight.data = weight_t.clone()
 bn.bias.data = bias_t.clone()
@@ -110,7 +114,8 @@ for param in bn.parameters():
     param.grad = param.grad / args.group_size
 bn_opt = optim.SGD(bn.parameters(), lr=1.0)
 
-sbn = apex.parallel.SyncBatchNorm(feature_size, process_group=apex.parallel.create_syncbn_process_group(args.group_size)).cuda()
+sbn = apex.parallel.SyncBatchNorm(
+    feature_size, process_group=apex.parallel.create_syncbn_process_group(args.group_size))
 sbn.momentum = 1.0
 sbn.weight.data = weight_t.clone()
 sbn.bias.data = bias_t.clone()
@@ -130,53 +135,73 @@ bn_result = True
 
 if args.local_rank == 0:
     sbn_result = compare("comparing mean: ", mean, m, error) and sbn_result
-    sbn_result = compare("comparing biased variance: ", var_biased, b_v, error) and sbn_result
+    sbn_result = compare("comparing biased variance: ",
+                         var_biased, b_v, error) and sbn_result
 
 out = syncbn.batchnorm_forward(inp_t, mean, inv_std, weight_t, bias_t)
-out_r = weight_r * (inp2_r - m.view(-1, 1, 1)) * torch.rsqrt(b_v.view(-1,1,1) + eps) + bias_r
+out_r = weight_r * (inp2_r - m.view(-1, 1, 1)) * \
+    torch.rsqrt(b_v.view(-1, 1, 1) + eps) + bias_r
 
 if args.local_rank == 0:
-    sbn_result = compare("comparing output: ", out, out_r, error) and sbn_result
+    sbn_result = compare("comparing output: ", out,
+                         out_r, error) and sbn_result
     compare("comparing bn output: ", out_bn, out_r, error)
 
 grad_output_t = type_tensor(grad)
 
-grad_output_r = ref_tensor(grad.transpose(1, 0, 2, 3).reshape(feature_size, -1))
+grad_output_r = ref_tensor(grad.transpose(
+    1, 0, 2, 3).reshape(feature_size, -1))
 grad_output2_r = ref_tensor(grad)
 
 grad_bias_r = grad_output_r.sum(1)
-grad_weight_r = ((inp2_r - m.view(-1, 1, 1)) * torch.rsqrt(b_v.view(-1,1,1) + eps) * grad_output2_r).transpose(1,0).contiguous().view(feature_size, -1).sum(1)
+grad_weight_r = ((inp2_r - m.view(-1, 1, 1)) * torch.rsqrt(b_v.view(-1, 1, 1) + eps)
+                 * grad_output2_r).transpose(1, 0).contiguous().view(feature_size, -1).sum(1)
 
 mean_dy_r = grad_output_r.mean(1)
-mean_dy_xmu_r = ((inp2_r - m.view(-1, 1, 1)) * grad_output2_r).transpose(1,0).contiguous().view(feature_size, -1).mean(1)
+mean_dy_xmu_r = ((inp2_r - m.view(-1, 1, 1)) * grad_output2_r).transpose(1,
+                                                                         0).contiguous().view(feature_size, -1).mean(1)
 
-grad_input_r = (grad_output2_r - mean_dy_r.view(-1, 1, 1) - (inp2_r - m.view(-1, 1, 1)) / (b_v.view(-1,1,1) + eps) * mean_dy_xmu_r.view(-1, 1, 1) ) * torch.rsqrt(b_v.view(-1,1,1) + eps) * weight_r.view(-1,1,1)
+grad_input_r = (grad_output2_r - mean_dy_r.view(-1, 1, 1) - (inp2_r - m.view(-1, 1, 1)) / (b_v.view(-1, 1, 1) + eps)
+                * mean_dy_xmu_r.view(-1, 1, 1)) * torch.rsqrt(b_v.view(-1, 1, 1) + eps) * weight_r.view(-1, 1, 1)
 
-mean_dy, mean_dy_xmu, grad_weight, grad_bias = syncbn.reduce_bn(grad_output_t, inp_t, mean, inv_std, weight_t)
-grad_input = syncbn.batchnorm_backward(grad_output_t, inp_t, mean, inv_std, weight_t, mean_dy, mean_dy_xmu)
+mean_dy, mean_dy_xmu, grad_weight, grad_bias = syncbn.reduce_bn(
+    grad_output_t, inp_t, mean, inv_std, weight_t)
+grad_input = syncbn.batchnorm_backward(
+    grad_output_t, inp_t, mean, inv_std, weight_t, mean_dy, mean_dy_xmu)
 
 if args.local_rank == 0:
-    sbn_result = compare("comparing bias grad: ", grad_bias, grad_bias_r, error) and sbn_result
-    sbn_result = compare("comparing weight grad: ", grad_weight, grad_weight_r, error) and sbn_result
-    sbn_result = compare("comparing mean_dy grad: ", mean_dy, mean_dy_r, error) and sbn_result
-    sbn_result = compare("comparing mean_dy_xmu grad: ", mean_dy_xmu, mean_dy_xmu_r, error) and sbn_result
-    sbn_result = compare("comparing input grad: ", grad_input, grad_input_r, error) and sbn_result
+    sbn_result = compare("comparing bias grad: ", grad_bias,
+                         grad_bias_r, error) and sbn_result
+    sbn_result = compare("comparing weight grad: ",
+                         grad_weight, grad_weight_r, error) and sbn_result
+    sbn_result = compare("comparing mean_dy grad: ",
+                         mean_dy, mean_dy_r, error) and sbn_result
+    sbn_result = compare("comparing mean_dy_xmu grad: ",
+                         mean_dy_xmu, mean_dy_xmu_r, error) and sbn_result
+    sbn_result = compare("comparing input grad: ", grad_input,
+                         grad_input_r, error) and sbn_result
     compare("comparing bn input grad: ", inp_bn.grad, grad_input_r, error)
 
 if args.local_rank == 0:
-    sbn_result = compare("comparing running_mean: ", bn.module.running_mean.data, sbn.module.running_mean.data, error) and sbn_result
-    sbn_result = compare("comparing running_variance: ", bn.module.running_var.data, sbn.module.running_var.data, error) and sbn_result
+    sbn_result = compare("comparing running_mean: ", bn.module.running_mean.data,
+                         sbn.module.running_mean.data, error) and sbn_result
+    sbn_result = compare("comparing running_variance: ", bn.module.running_var.data,
+                         sbn.module.running_var.data, error) and sbn_result
 
 # execute by both
-compare("comparing layers output: ", out_bn[start:finish], out_sbn, error) and sbn_result
-compare("comparing layers grad_input: ", inp_bn.grad[start:finish], inp_sbn.grad[start:finish], error) and sbn_result
+compare("comparing layers output: ",
+        out_bn[start:finish], out_sbn, error) and sbn_result
+compare("comparing layers grad_input: ",
+        inp_bn.grad[start:finish], inp_sbn.grad[start:finish], error) and sbn_result
 
 bn_opt.step()
 sbn_opt.step()
 
 if args.local_rank == 0:
-    compare("comparing bn vs sbn bias: ", bn.module.bias, sbn.module.bias, error)
-    compare("comparing bn vs sbn weight: ", bn.module.weight, sbn.module.weight, error)
+    compare("comparing bn vs sbn bias: ",
+            bn.module.bias, sbn.module.bias, error)
+    compare("comparing bn vs sbn weight: ",
+            bn.module.weight, sbn.module.weight, error)
 
 
 if sbn_result:

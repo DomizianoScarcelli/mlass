@@ -56,8 +56,8 @@ class Metrics:
     def update(self, tag, val, batch):
         # v is average value over batch
         # store total value and total batch, returns dist average
-        sum = t.tensor(val * batch).float().cuda()
-        n = t.tensor(batch).float().cuda()
+        sum = t.tensor(val * batch).float()
+        n = t.tensor(batch).float()
         dist.all_reduce(sum)
         dist.all_reduce(n)
         sum = sum.item()

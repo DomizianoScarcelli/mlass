@@ -11,12 +11,12 @@ from lass_audio.jukebox.utils.checkpoint import checkpoint
 
 def _convert_mlp_traced(l):
     if isinstance(l, ResAttnBlock):
-        l.mlp = t.jit.trace(l.mlp, t.randn(1, 1, l.n_in).cuda())
+        l.mlp = t.jit.trace(l.mlp, t.randn(1, 1, l.n_in))
 
 
 def _convert_mlp_traced_fp16(l):
     if isinstance(l, ResAttnBlock):
-        l.mlp = t.jit.trace(l.mlp, t.randn(1, 1, l.n_in).cuda().half())
+        l.mlp = t.jit.trace(l.mlp, t.randn(1, 1, l.n_in).half())
 
 
 class MLP(nn.Module):
@@ -222,8 +222,8 @@ class Transformer(nn.Module):
         bs, l, s, d = (4, self.n_ctx, self.encoder_dims, self.n_in)
         prime = 5
         with t.no_grad():
-            encoder_kv = t.randn(bs, s, d).cuda()
-            x = t.randn(bs, l, d).cuda()
+            encoder_kv = t.randn(bs, s, d)
+            x = t.randn(bs, l, d)
             y_forw = self.forward(x, encoder_kv=encoder_kv, sample=True)
 
             self.del_cache()
@@ -254,7 +254,7 @@ if __name__ == '__main__':
     for attn_order in [0, 2, 6]:
         encoder_dims = {0: 0, 2: 0, 6: 64}[attn_order]
         prior = Transformer(n_in, n_ctx, n_head, n_depth, mask=True,
-                            attn_order=attn_order, encoder_dims=encoder_dims, blocks=blocks).cuda()
+                            attn_order=attn_order, encoder_dims=encoder_dims, blocks=blocks)
         prior.training = False
         prior.check_sample()
         print(f"Checked attn_order: {attn_order}")

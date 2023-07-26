@@ -3,7 +3,7 @@ import functools
 from pathlib import Path
 from typing import Callable, List, Mapping
 
-import diba
+from diba.diba import fast_beamsearch_separation, fast_sampled_separation
 import numpy as np
 import torch
 import torchaudio
@@ -58,7 +58,7 @@ class BeamsearchSeparator(Separator):
         mixture_codes = self.encode_fn(mixture)
 
         # separate mixture (x has shape [2, num. tokens])
-        x = diba.fast_beamsearch_separation(
+        x = fast_beamsearch_separation(
             priors=self.priors,
             likelihood=self.likelihood,
             mixture=mixture_codes,
@@ -94,7 +94,7 @@ class TopkSeparator(Separator):
     def separate(self, mixture: torch.Tensor):
         mixture_codes = self.encode_fn(mixture)
 
-        x_0, x_1 = diba.fast_sampled_separation(
+        x_0, x_1 = fast_sampled_separation(
             priors=self.priors,
             likelihood=Likelihood,
             mixture=mixture_codes,
@@ -214,7 +214,8 @@ def main(
     # if not resume and save_path.exists():
     #    raise ValueError(f"Path {save_path} already exists!")
 
-    rank, local_rank, device = setup_dist_from_mpi(port=29533, verbose=True)
+    # rank, local_rank, device = setup_dist_from_mpi(port=29533, verbose=True)
+    device = "cpu"
 
     # setup models
     vqvae = setup_vqvae(

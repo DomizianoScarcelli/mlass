@@ -23,7 +23,7 @@ if args.distributed:
 
     # FOR DISTRIBUTED:  Initialize the backend.  torch.distributed.launch will provide
     # environment variables, and requires that you use init_method=`env://`.
-    torch.distributed.init_process_group(backend='nccl',
+    torch.distributed.init_process_group(backend='gloo',
                                          init_method='env://')
 
 torch.backends.cudnn.benchmark = True
@@ -37,7 +37,7 @@ N, D_in, D_out = 64, 1024, 16
 x = torch.randn(N, D_in, device='cuda')
 y = torch.randn(N, D_out, device='cuda')
 
-model = torch.nn.Linear(D_in, D_out).cuda()
+model = torch.nn.Linear(D_in, D_out)
 optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
 
 model, optimizer = amp.initialize(model, optimizer, opt_level="O1")

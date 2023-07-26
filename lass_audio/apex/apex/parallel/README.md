@@ -27,33 +27,33 @@ arbitrary spatial dimensions.
 Apex provides two sync BN implementation:
 
 1. There is the Python-only implementation, which is the default implementation
-when install with `python setup.py install`.
-It uses PyTorch primitive operations and distributed communication package from
-`torch.distributed`.
+   when install with `python setup.py install`.
+   It uses PyTorch primitive operations and distributed communication package from
+   `torch.distributed`.
 
-   - _Python-only implementation requires input tensor to be of same data type as
-layer_
+    - _Python-only implementation requires input tensor to be of same data type as
+      layer_
 
 2. We also provide implementation with kernels through CUDA/C++ extension with
-improved performance. We are experimenting with Welford and Kahan for reduction
-hoping to get better accuracy.
+   improved performance. We are experimenting with Welford and Kahan for reduction
+   hoping to get better accuracy.
    To use the kernel implementation, user need to install Apex with CUDA extension
-enabled `python setup.py install --cuda_ext`.
+   enabled `python setup.py install --cuda_ext`.
 
-   - _Custom kernel implementation supports fp16 input with fp32 layer as cudnn.
-This is required to run imagenet example in fp16._
+    - _Custom kernel implementation supports fp16 input with fp32 layer as cudnn.
+      This is required to run imagenet example in fp16._
 
-   - _Currently kernel implementation only supports GPU._
+    - _Currently kernel implementation only supports GPU._
 
 #### HowTo
 
 1. User could use `apex.parallel.SyncBatchNorm` by building their module with
-the layer explicitly.
+   the layer explicitly.
 
 ```
 import apex
-input_t = torch.randn(3, 5, 20).cuda()
-sbn = apex.parallel.SyncBatchNorm(5).cuda()
+input_t = torch.randn(3, 5, 20)
+sbn = apex.parallel.SyncBatchNorm(5)
 output_t = sbn(input)
 ```
 

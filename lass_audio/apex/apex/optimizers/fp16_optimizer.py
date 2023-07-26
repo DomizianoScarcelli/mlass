@@ -1,6 +1,7 @@
 import torch
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 
+
 class FP16_Optimizer(object):
     """
     :class:`FP16_Optimizer` A cutdown version of apex.fp16_utils.FP16_Optimizer.
@@ -9,7 +10,7 @@ class FP16_Optimizer(object):
 
     Example::
 
-        model = torch.nn.Linear(D_in, D_out).cuda().half()
+        model = torch.nn.Linear(D_in, D_out).half()
         optimizer = apex.optimizers.FusedAdam(model.parameters())
         # Name the FP16_Optimizer instance to replace the existing optimizer
         # (recommended but not required):
@@ -58,21 +59,26 @@ class FP16_Optimizer(object):
             # push this group to list before modify
             self.fp16_groups.append(param_group['params'])
             # init fp16 weight buffer, flattened
-            self.fp16_groups_flat.append(_flatten_dense_tensors([p.clone().detach() for p in self.fp16_groups[i]]))
+            self.fp16_groups_flat.append(_flatten_dense_tensors(
+                [p.clone().detach() for p in self.fp16_groups[i]]))
             # set model fp16 weight to slices of flattened buffer
-            updated_params = _unflatten_dense_tensors(self.fp16_groups_flat[i], self.fp16_groups[i])
-            for p,q in zip(self.fp16_groups[i], updated_params):
+            updated_params = _unflatten_dense_tensors(
+                self.fp16_groups_flat[i], self.fp16_groups[i])
+            for p, q in zip(self.fp16_groups[i], updated_params):
                 p.data = q.data
             # init master weight, flattened
-            self.fp32_groups_flat.append(self.fp16_groups_flat[i].clone().float().detach())
+            self.fp32_groups_flat.append(
+                self.fp16_groups_flat[i].clone().float().detach())
             # modify optimizer of have flat master weight
-            self.fp32_groups_flat[i].requires_grad = True # keep this in case internal optimizer uses it
+            # keep this in case internal optimizer uses it
+            self.fp32_groups_flat[i].requires_grad = True
             param_group['params'] = [self.fp32_groups_flat[i]]
 
         # we may have a way of fusing dynamic scale. Do not support for now
         if dynamic_loss_scale:
             if dynamic_loss_args is not None:
-                raise SystemError("Do not support dynamic loss scale args for now.")
+                raise SystemError(
+                    "Do not support dynamic loss scale args for now.")
             self.dynamic_loss_scale = True
             self.cur_scale = 2**16
             self.cur_iter = 0
@@ -136,9 +142,10 @@ class FP16_Optimizer(object):
         norm_groups = []
         skip = False
         for i, group in enumerate(self.fp16_groups):
-            grads_groups_flat.append(_flatten_dense_tensors([p.grad for p in group]))
+            grads_groups_flat.append(
+                _flatten_dense_tensors([p.grad for p in group]))
             norm_groups.append(self._compute_grad_norm(grads_groups_flat[i]))
-            if norm_groups[i] == -1: #TODO: early break
+            if norm_groups[i] == -1:  # TODO: early break
                 skip = True
 
         if skip:
@@ -153,8 +160,9 @@ class FP16_Optimizer(object):
 
         # TODO: we probably don't need this? just to be safe
         for i in range(len(norm_groups)):
-            updated_params = _unflatten_dense_tensors(self.fp16_groups_flat[i], self.fp16_groups[i])
-            for p,q in zip(self.fp16_groups[i], updated_params):
+            updated_params = _unflatten_dense_tensors(
+                self.fp16_groups_flat[i], self.fp16_groups[i])
+            for p, q in zip(self.fp16_groups[i], updated_params):
                 p.data = q.data
 
         self._update_scale(False)
@@ -186,7 +194,7 @@ class FP16_Optimizer(object):
             if skip:
                 print("\nGrad overflow on iteration", self.cur_iter)
                 print("Using static loss scale of", self.cur_scale)
-        self.cur_iter +=1
+        self.cur_iter += 1
         return
 
     # Promote state so it can be retrieved or set via "fp16_optimizer_instance.state"
@@ -239,7 +247,7 @@ class FP16_Optimizer(object):
         will call ``model.load_state_dict()`` before
         ``fp16_optimizer_instance.load_state_dict()`` is called.
         Example::
-            model = torch.nn.Linear(D_in, D_out).cuda().half()
+            model = torch.nn.Linear(D_in, D_out).half()
             optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
             optimizer = FP16_Optimizer(optimizer, static_loss_scale = 128.0)
             ...

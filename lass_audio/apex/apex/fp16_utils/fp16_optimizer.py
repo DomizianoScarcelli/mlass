@@ -10,6 +10,8 @@ from ..multi_tensor_apply import multi_tensor_applier
 from .fp16util import model_grads_to_master_grads, master_params_to_model_params, clip_grad_norm
 
 # TODO:  Update overflow check + downscale to use Carl's fused kernel.
+
+
 class FP16_Optimizer(object):
     """
     :class:`FP16_Optimizer` is designed to wrap an existing PyTorch optimizer, 
@@ -19,7 +21,7 @@ class FP16_Optimizer(object):
 
     Example::
 
-        model = torch.nn.Linear(D_in, D_out).cuda().half()
+        model = torch.nn.Linear(D_in, D_out).half()
         optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
         # Name the FP16_Optimizer instance to replace the existing optimizer
         # (recommended but not required):
@@ -83,7 +85,7 @@ class FP16_Optimizer(object):
     See docstring for :attr:`step`.
 
     **Gradient clipping**:  Use :attr:`clip_master_grads`.
-    
+
     **Multiple losses**:  If your model accumulates gradients from multiple losses,
     this can be made more efficient by supplying ``update_master_grads=False``
     to :attr:`backward`.  See docstring for :attr:`backward`.
@@ -104,9 +106,9 @@ class FP16_Optimizer(object):
     should still work as intended.
     """
 
-    def __init__(self, 
-                 init_optimizer, 
-                 static_loss_scale=1.0, 
+    def __init__(self,
+                 init_optimizer,
+                 static_loss_scale=1.0,
                  dynamic_loss_scale=False,
                  dynamic_loss_args=None,
                  verbose=True):
@@ -124,7 +126,8 @@ class FP16_Optimizer(object):
         self.fp32_from_fp16_groups = []
         self.fp32_from_fp32_groups = []
         for i, param_group in enumerate(self.optimizer.param_groups):
-            self.maybe_print("FP16_Optimizer processing param group {}:".format(i))
+            self.maybe_print(
+                "FP16_Optimizer processing param group {}:".format(i))
             fp16_params_this_group = []
             fp32_params_this_group = []
             fp32_from_fp16_params_this_group = []
@@ -141,7 +144,8 @@ class FP16_Optimizer(object):
                         # Reset existing state dict key to the new master param.
                         # We still need to recast per-param state tensors, if any, to FP32.
                         if param in self.optimizer.state:
-                           self.optimizer.state[master_param] = self.optimizer.state.pop(param) 
+                            self.optimizer.state[master_param] = self.optimizer.state.pop(
+                                param)
                     elif param.type() == 'torch.cuda.FloatTensor':
                         self.maybe_print("FP16_Optimizer received torch.cuda.FloatTensor with {}"
                                          .format(param.size()))
@@ -149,9 +153,9 @@ class FP16_Optimizer(object):
                         param_group['params'][i] = param
                     else:
                         raise TypeError("Wrapped parameters must be either "
-                                        "torch.cuda.FloatTensor or torch.cuda.HalfTensor. "  
+                                        "torch.cuda.FloatTensor or torch.cuda.HalfTensor. "
                                         "Received {}".format(param.type()))
-            
+
             self.fp16_groups.append(fp16_params_this_group)
             self.fp32_from_fp16_groups.append(fp32_from_fp16_params_this_group)
             self.fp32_from_fp32_groups.append(fp32_params_this_group)
@@ -192,19 +196,21 @@ class FP16_Optimizer(object):
         if multi_tensor_applier.available:
             import amp_C
             self.multi_tensor_scale = amp_C.multi_tensor_scale
-            self._dummy_overflow_buf = torch.cuda.IntTensor([0]);
+            self._dummy_overflow_buf = torch.cuda.IntTensor([0])
 
     # Having self.maybe_print distinct from _amp_state.maybe_print is another artifact
     # of having to support FP16_Optimizer separately, for the time being.
     def maybe_print(self, msg):
         if self.verbose:
             print(msg)
-            
+
     def __getstate__(self):
-        raise RuntimeError("FP16_Optimizer should be serialized using state_dict().")
+        raise RuntimeError(
+            "FP16_Optimizer should be serialized using state_dict().")
 
     def __setstate__(self, state):
-        raise RuntimeError("FP16_Optimizer should be deserialized using load_state_dict().")
+        raise RuntimeError(
+            "FP16_Optimizer should be deserialized using load_state_dict().")
 
     def zero_grad(self, set_grads_to_None=False):
         """
@@ -214,13 +220,13 @@ class FP16_Optimizer(object):
         # because gradients are copied into the FP32 master params.  However, we zero
         # all gradients owned by the optimizer, just to be safe:
         for group in self.optimizer.param_groups:
-             for p in group['params']:
-                 if set_grads_to_None:
-                     p.grad = None
-                 else:
-                     if p.grad is not None:
-                         p.grad.detach_()
-                         p.grad.zero_()
+            for p in group['params']:
+                if set_grads_to_None:
+                    p.grad = None
+                else:
+                    if p.grad is not None:
+                        p.grad.detach_()
+                        p.grad.zero_()
 
         # Zero fp16 gradients owned by the model:
         for fp16_group in self.fp16_groups:
@@ -229,7 +235,7 @@ class FP16_Optimizer(object):
                     param.grad = None
                 else:
                     if param.grad is not None:
-                        param.grad.detach_() # as in torch.optim.optimizer.zero_grad()
+                        param.grad.detach_()  # as in torch.optim.optimizer.zero_grad()
                         param.grad.zero_()
 
     # Should not be used anymore.
@@ -326,7 +332,7 @@ class FP16_Optimizer(object):
 
         Example::
 
-            model = torch.nn.Linear(D_in, D_out).cuda().half()
+            model = torch.nn.Linear(D_in, D_out).half()
             optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
             optimizer = FP16_Optimizer(optimizer, static_loss_scale = 128.0)
             ...
@@ -341,24 +347,24 @@ class FP16_Optimizer(object):
         self.first_closure_call_this_step = state_dict['first_closure_call_this_step']
         self.optimizer.load_state_dict(state_dict['optimizer_state_dict'])
         # At this point, the optimizer's references to the model's fp32 parameters are up to date.
-        # The optimizer's hyperparameters and internal buffers are also up to date.  
+        # The optimizer's hyperparameters and internal buffers are also up to date.
         # However, the fp32 master copies of the model's fp16 params stored by the optimizer are still
-        # out of date.  There are two options.  
-        # 1:  Refresh the master params from the model's fp16 params.  
+        # out of date.  There are two options.
+        # 1:  Refresh the master params from the model's fp16 params.
         # This requires less storage but incurs precision loss.
         # 2:  Save and restore the fp32 master copies separately.
         # We choose option 2.
-        # 
-        # Pytorch Optimizer.load_state_dict casts saved buffers (e.g. momentum) to the type and device 
-        # of their associated parameters, because it's possible those buffers might not exist yet in 
-        # the current optimizer instance.  In our case, as long as the current FP16_Optimizer has been 
+        #
+        # Pytorch Optimizer.load_state_dict casts saved buffers (e.g. momentum) to the type and device
+        # of their associated parameters, because it's possible those buffers might not exist yet in
+        # the current optimizer instance.  In our case, as long as the current FP16_Optimizer has been
         # constructed in the same way as the one whose state_dict we are loading, the same master params
         # are guaranteed to exist, so we can just copy_() from the saved master params.
         for current_group, saved_group in zip(self.fp32_from_fp16_groups, state_dict['fp32_from_fp16']):
             for current, saved in zip(current_group, saved_group):
                 current.data.copy_(saved.data)
 
-    def step(self, closure=None): # could add clip option.
+    def step(self, closure=None):  # could add clip option.
         """
         If no closure is supplied, :attr:`step` should be called after 
         ``fp16_optimizer_obj.backward(loss)``.
@@ -406,9 +412,9 @@ class FP16_Optimizer(object):
         if self.overflow:
             # Using _amp_state.maybe_print instead of self.print here is intentional.
             maybe_print("Gradient overflow.  Skipping step, reducing " +
-                "loss scale to {}".format(self.loss_scaler.loss_scale()))
+                        "loss scale to {}".format(self.loss_scaler.loss_scale()))
             return
-        
+
         if closure is not None:
             retval = self._step_with_closure(closure)
         else:
@@ -432,7 +438,7 @@ class FP16_Optimizer(object):
                 self.first_closure_call_this_step = False
             else:
                 # If self.optimizer.step() internally calls wrapped_closure more than once,
-                # it may update the fp32 params after each call.  However, self.optimizer 
+                # it may update the fp32 params after each call.  However, self.optimizer
                 # doesn't know about the fp16 params at all.  If the fp32 params get updated,
                 # we can't rely on self.optimizer to refresh the fp16 params.  We need
                 # to handle that manually:
@@ -440,12 +446,12 @@ class FP16_Optimizer(object):
             # Our API expects the user to give us ownership of the backward() call by
             # replacing all calls to loss.backward() with optimizer.backward(loss).
             # This requirement holds whether or not the call to backward() is made within a closure.
-            # If the user is properly calling optimizer.backward(loss) within "closure," 
+            # If the user is properly calling optimizer.backward(loss) within "closure,"
             # calling closure() here will give the fp32 master params fresh gradients
-            # for the optimizer to play with, so all wrapped_closure needs to do is call 
+            # for the optimizer to play with, so all wrapped_closure needs to do is call
             # closure() and return the loss.
-            temp_loss = closure() 
-            while(self.overflow):
+            temp_loss = closure()
+            while (self.overflow):
                 scale = self.loss_scaler.loss_scale()
                 # self._update_scale(self.overflow) # now done at the end of backward
                 print("OVERFLOW within closure! Skipping step, reducing loss scale to {}".format(
@@ -512,11 +518,11 @@ class FP16_Optimizer(object):
             optimizer.backward(loss1, update_master_grads=False)
             optimizer.backward(loss2, update_master_grads=False)
             optimizer.update_master_grads()
-        """ 
-        # To consider:  try multiple backward passes using retain_grad=True to find 
+        """
+        # To consider:  try multiple backward passes using retain_grad=True to find
         # a loss scale that works.  After you find a loss scale that works, do a final dummy
-        # backward pass with retain_graph=False to tear down the graph.  Doing this would avoid 
-        # discarding the iteration,  but probably wouldn't improve overall efficiency.  
+        # backward pass with retain_graph=False to tear down the graph.  Doing this would avoid
+        # discarding the iteration,  but probably wouldn't improve overall efficiency.
         scaled_loss = loss.float()*self.loss_scaler.loss_scale()
         scaled_loss.backward(retain_graph=retain_graph)
         if update_master_grads:
@@ -578,7 +584,6 @@ class FP16_Optimizer(object):
         self.overflow = self.loss_scaler.update_scale()
         # torch.cuda.nvtx.range_pop()
 
-
     def inspect_master_grad_data(self):
         """
         When running with :class:`FP16_Optimizer`, 
@@ -612,8 +617,8 @@ class FP16_Optimizer(object):
                 master_grads_data.append(master_grads_this_group)
             return master_grads_data
 
-
     # Promote loss scale so it can be retrieved or set via "fp16_optimizer_instance.loss_scale"
+
     def _get_loss_scale(self):
         return self.loss_scaler.loss_scale()
 
@@ -640,4 +645,3 @@ class FP16_Optimizer(object):
         self.optimizer.param_groups = value
 
     param_groups = property(_get_param_groups, _set_param_groups)
-

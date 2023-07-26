@@ -45,18 +45,19 @@ class SyncBatchNorm(_BatchNorm):
 
     Examples::
         >>> # channel first tensor
-        >>> sbn = apex.parallel.SyncBatchNorm(100).cuda()
-        >>> inp = torch.randn(10, 100, 14, 14).cuda()
+        >>> sbn = apex.parallel.SyncBatchNorm(100)
+        >>> inp = torch.randn(10, 100, 14, 14)
         >>> out = sbn(inp)
-        >>> inp = torch.randn(3, 100, 20).cuda()
+        >>> inp = torch.randn(3, 100, 20)
         >>> out = sbn(inp)
         >>> # channel last tensor
-        >>> sbn = apex.parallel.SyncBatchNorm(100, channel_last=True).cuda()
-        >>> inp = torch.randn(10, 14, 14, 100).cuda()
+        >>> sbn = apex.parallel.SyncBatchNorm(100, channel_last=True)
+        >>> inp = torch.randn(10, 14, 14, 100)
     """
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True, process_group=None, channel_last=False):
-        super(SyncBatchNorm, self).__init__(num_features, eps=eps, momentum=momentum, affine=affine, track_running_stats=track_running_stats)
+        super(SyncBatchNorm, self).__init__(num_features, eps=eps,
+                                            momentum=momentum, affine=affine, track_running_stats=track_running_stats)
         self.process_group = process_group
         self.channel_last = channel_last
 
@@ -78,7 +79,8 @@ class SyncBatchNorm(_BatchNorm):
             if self.training and self.track_running_stats:
                 self.num_batches_tracked += 1
                 if self.momentum is None:
-                    exponential_average_factor = 1.0 / float(self.num_batches_tracked)
+                    exponential_average_factor = 1.0 / \
+                        float(self.num_batches_tracked)
                 else:
                     exponential_average_factor = self.momentum
             return SyncBatchnormFunction.apply(input, self.weight, self.bias, self.running_mean, self.running_var, self.eps, self.training or not self.track_running_stats, exponential_average_factor, self.process_group, channel_last)

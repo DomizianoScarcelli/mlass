@@ -23,7 +23,8 @@ try:
     from apex import amp, optimizers
     from apex.multi_tensor_apply import multi_tensor_applier
 except ImportError:
-    raise ImportError("Please install apex from https://www.github.com/nvidia/apex to run this example.")
+    raise ImportError(
+        "Please install apex from https://www.github.com/nvidia/apex to run this example.")
 
 model_names = sorted(name for name in models.__dict__
                      if name.islower() and not name.startswith("__")
@@ -74,27 +75,30 @@ parser.add_argument('--loss-scale', type=str, default=None)
 
 cudnn.benchmark = True
 
+
 def fast_collate(batch):
     imgs = [img[0] for img in batch]
     targets = torch.tensor([target[1] for target in batch], dtype=torch.int64)
     w = imgs[0].size[0]
     h = imgs[0].size[1]
-    tensor = torch.zeros( (len(imgs), 3, h, w), dtype=torch.uint8 )
+    tensor = torch.zeros((len(imgs), 3, h, w), dtype=torch.uint8)
     for i, img in enumerate(imgs):
         nump_array = np.asarray(img, dtype=np.uint8)
-        if(nump_array.ndim < 3):
+        if (nump_array.ndim < 3):
             nump_array = np.expand_dims(nump_array, axis=-1)
         nump_array = np.rollaxis(nump_array, 2)
 
         tensor[i] += torch.from_numpy(nump_array)
-        
+
     return tensor, targets
+
 
 best_prec1 = 0
 args = parser.parse_args()
 
 print("opt_level = {}".format(args.opt_level))
-print("keep_batchnorm_fp32 = {}".format(args.keep_batchnorm_fp32), type(args.keep_batchnorm_fp32))
+print("keep_batchnorm_fp32 = {}".format(
+    args.keep_batchnorm_fp32), type(args.keep_batchnorm_fp32))
 print("loss_scale = {}".format(args.loss_scale), type(args.loss_scale))
 
 print("\nCUDNN VERSION: {}\n".format(torch.backends.cudnn.version()))
@@ -104,6 +108,7 @@ if args.deterministic:
     cudnn.deterministic = True
     torch.manual_seed(args.local_rank)
     torch.set_printoptions(precision=10)
+
 
 def main():
     global best_prec1, args
@@ -118,7 +123,7 @@ def main():
     if args.distributed:
         args.gpu = args.local_rank
         torch.cuda.set_device(args.gpu)
-        torch.distributed.init_process_group(backend='nccl',
+        torch.distributed.init_process_group(backend='gloo',
                                              init_method='env://')
         args.world_size = torch.distributed.get_world_size()
 
@@ -137,10 +142,10 @@ def main():
         print("using apex synced BN")
         model = apex.parallel.convert_syncbn_model(model)
 
-    model = model.cuda()
+    model = model
 
     # Scale learning rate based on global batch size
-    args.lr = args.lr*float(args.batch_size*args.world_size)/256. 
+    args.lr = args.lr*float(args.batch_size*args.world_size)/256.
     optimizer = torch.optim.SGD(model.parameters(), args.lr,
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
@@ -158,14 +163,14 @@ def main():
     # before model, ... = amp.initialize(model, ...), the call to amp.initialize may alter
     # the types of model's parameters in a way that disrupts or destroys DDP's allreduce hooks.
     if args.distributed:
-        # By default, apex.parallel.DistributedDataParallel overlaps communication with 
+        # By default, apex.parallel.DistributedDataParallel overlaps communication with
         # computation in the backward pass.
         # model = DDP(model)
         # delay_allreduce delays all communication to the end of the backward pass.
         model = DDP(model, delay_allreduce=True)
 
     # define loss function (criterion) and optimizer
-    criterion = nn.CrossEntropyLoss().cuda()
+    criterion = nn.CrossEntropyLoss()
 
     # Optionally resume from a checkpoint
     if args.resume:
@@ -173,7 +178,8 @@ def main():
         def resume():
             if os.path.isfile(args.resume):
                 print("=> loading checkpoint '{}'".format(args.resume))
-                checkpoint = torch.load(args.resume, map_location = lambda storage, loc: storage.cuda(args.gpu))
+                checkpoint = torch.load(
+                    args.resume, map_location=lambda storage, loc: storage.cuda(args.gpu))
                 args.start_epoch = checkpoint['epoch']
                 best_prec1 = checkpoint['best_prec1']
                 model.load_state_dict(checkpoint['state_dict'])
@@ -188,8 +194,9 @@ def main():
     traindir = os.path.join(args.data, 'train')
     valdir = os.path.join(args.data, 'val')
 
-    if(args.arch == "inception_v3"):
-        raise RuntimeError("Currently, inception_v3 is not supported by this example.")
+    if (args.arch == "inception_v3"):
+        raise RuntimeError(
+            "Currently, inception_v3 is not supported by this example.")
         # crop_size = 299
         # val_size = 320 # I chose this value arbitrarily, we can adjust.
     else:
@@ -205,18 +212,21 @@ def main():
             # normalize,
         ]))
     val_dataset = datasets.ImageFolder(valdir, transforms.Compose([
-            transforms.Resize(val_size),
-            transforms.CenterCrop(crop_size),
-        ]))
+        transforms.Resize(val_size),
+        transforms.CenterCrop(crop_size),
+    ]))
 
     train_sampler = None
     val_sampler = None
     if args.distributed:
-        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
-        val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
+        train_sampler = torch.utils.data.distributed.DistributedSampler(
+            train_dataset)
+        val_sampler = torch.utils.data.distributed.DistributedSampler(
+            val_dataset)
 
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
+        train_dataset, batch_size=args.batch_size, shuffle=(
+            train_sampler is None),
         num_workers=args.workers, pin_memory=True, sampler=train_sampler, collate_fn=fast_collate)
 
     val_loader = torch.utils.data.DataLoader(
@@ -250,15 +260,18 @@ def main():
                 'arch': args.arch,
                 'state_dict': model.state_dict(),
                 'best_prec1': best_prec1,
-                'optimizer' : optimizer.state_dict(),
+                'optimizer': optimizer.state_dict(),
             }, is_best)
+
 
 class data_prefetcher():
     def __init__(self, loader):
         self.loader = iter(loader)
         self.stream = torch.cuda.Stream()
-        self.mean = torch.tensor([0.485 * 255, 0.456 * 255, 0.406 * 255]).cuda().view(1,3,1,1)
-        self.std = torch.tensor([0.229 * 255, 0.224 * 255, 0.225 * 255]).cuda().view(1,3,1,1)
+        self.mean = torch.tensor(
+            [0.485 * 255, 0.456 * 255, 0.406 * 255]).view(1, 3, 1, 1)
+        self.std = torch.tensor(
+            [0.229 * 255, 0.224 * 255, 0.225 * 255]).view(1, 3, 1, 1)
         # With Amp, it isn't necessary to manually convert data to half.
         # if args.fp16:
         #     self.mean = self.mean.half()
@@ -295,7 +308,7 @@ class data_prefetcher():
             # else:
             self.next_input = self.next_input.float()
             self.next_input = self.next_input.sub_(self.mean).div_(self.std)
-            
+
     def next(self):
         torch.cuda.current_stream().wait_stream(self.stream)
         input = self.next_input
@@ -329,47 +342,53 @@ def train(train_loader, model, criterion, optimizer, epoch):
                 break
 
         # compute output
-        if args.prof: torch.cuda.nvtx.range_push("forward")
+        if args.prof:
+            torch.cuda.nvtx.range_push("forward")
         output = model(input)
-        if args.prof: torch.cuda.nvtx.range_pop()
+        if args.prof:
+            torch.cuda.nvtx.range_pop()
         loss = criterion(output, target)
 
         # compute gradient and do SGD step
         optimizer.zero_grad()
 
-        if args.prof: torch.cuda.nvtx.range_push("backward")
+        if args.prof:
+            torch.cuda.nvtx.range_push("backward")
         with amp.scale_loss(loss, optimizer) as scaled_loss:
             scaled_loss.backward()
-        if args.prof: torch.cuda.nvtx.range_pop()
+        if args.prof:
+            torch.cuda.nvtx.range_pop()
 
         # for param in model.parameters():
         #     print(param.data.double().sum().item(), param.grad.data.double().sum().item())
 
-        if args.prof: torch.cuda.nvtx.range_push("step")
+        if args.prof:
+            torch.cuda.nvtx.range_push("step")
         optimizer.step()
-        if args.prof: torch.cuda.nvtx.range_pop()
+        if args.prof:
+            torch.cuda.nvtx.range_pop()
 
-        if i%args.print_freq == 0:
+        if i % args.print_freq == 0:
             # Every print_freq iterations, check the loss, accuracy, and speed.
             # For best performance, it doesn't make sense to print these metrics every
             # iteration, since they incur an allreduce and some host<->device syncs.
 
             # Measure accuracy
             prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
-   
-            # Average loss and accuracy across processes for logging 
+
+            # Average loss and accuracy across processes for logging
             if args.distributed:
                 reduced_loss = reduce_tensor(loss.data)
                 prec1 = reduce_tensor(prec1)
                 prec5 = reduce_tensor(prec5)
             else:
                 reduced_loss = loss.data
-   
+
             # to_python_float incurs a host<->device sync
             losses.update(to_python_float(reduced_loss), input.size(0))
             top1.update(to_python_float(prec1), input.size(0))
             top5.update(to_python_float(prec5), input.size(0))
-    
+
             torch.cuda.synchronize()
             batch_time.update((time.time() - end)/args.print_freq)
             end = time.time()
@@ -381,11 +400,11 @@ def train(train_loader, model, criterion, optimizer, epoch):
                       'Loss {loss.val:.10f} ({loss.avg:.4f})\t'
                       'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
                       'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
-                       epoch, i, len(train_loader),
-                       args.world_size*args.batch_size/batch_time.val,
-                       args.world_size*args.batch_size/batch_time.avg,
-                       batch_time=batch_time,
-                       loss=losses, top1=top1, top5=top5))
+                          epoch, i, len(train_loader),
+                          args.world_size*args.batch_size/batch_time.val,
+                          args.world_size*args.batch_size/batch_time.avg,
+                          batch_time=batch_time,
+                          loss=losses, top1=top1, top5=top5))
 
         input, target = prefetcher.next()
 
@@ -438,11 +457,11 @@ def validate(val_loader, model, criterion):
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                   'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
                   'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
-                   i, len(val_loader),
-                   args.world_size * args.batch_size / batch_time.val,
-                   args.world_size * args.batch_size / batch_time.avg,
-                   batch_time=batch_time, loss=losses,
-                   top1=top1, top5=top5))
+                      i, len(val_loader),
+                      args.world_size * args.batch_size / batch_time.val,
+                      args.world_size * args.batch_size / batch_time.avg,
+                      batch_time=batch_time, loss=losses,
+                      top1=top1, top5=top5))
 
         input, target = prefetcher.next()
 
@@ -460,6 +479,7 @@ def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
+
     def __init__(self):
         self.reset()
 
@@ -517,6 +537,7 @@ def reduce_tensor(tensor):
     dist.all_reduce(rt, op=dist.reduce_op.SUM)
     rt /= args.world_size
     return rt
+
 
 if __name__ == '__main__':
     main()

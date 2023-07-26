@@ -24,7 +24,7 @@ def allgather(x):
 
 
 def allreduce(x, op=dist.ReduceOp.SUM):
-    x = torch.tensor(x).float().cuda()
+    x = torch.tensor(x).float()
     dist.all_reduce(x, op=op)
     return x.item()
 
@@ -49,22 +49,23 @@ def allgather_lists(xs):
 
 
 def setup_dist_from_mpi(
-    master_addr="127.0.0.1", backend="nccl", port=29500, n_attempts=5, verbose=False
+    master_addr="127.0.0.1", backend="gloo", port=29500, n_attempts=5, verbose=False
 ):
-    if dist.is_available():
-        return _setup_dist_from_mpi(master_addr, backend, port, n_attempts, verbose)
-    else:
-        use_cuda = torch.cuda.is_available()
-        print(f'Using cuda {use_cuda}')
+    # if dist.is_available():
+    #     return _setup_dist_from_mpi(master_addr, backend, port, n_attempts, verbose)
+    # else:
+    use_cuda = torch.cuda.is_available()
+    print(f'Using cuda {use_cuda}')
 
-        mpi_rank = 0
-        local_rank = 0
+    mpi_rank = 0
+    local_rank = 0
 
-        device = torch.device(
-            "cuda", local_rank) if use_cuda else torch.device("cpu")
+    device = torch.device(
+        "cuda", local_rank) if use_cuda else torch.device("cpu")
+    if use_cuda:
         torch.cuda.set_device(local_rank)
 
-        return mpi_rank, local_rank, device
+    return mpi_rank, local_rank, device
 
 
 def _setup_dist_from_mpi(master_addr, backend, port, n_attempts, verbose):

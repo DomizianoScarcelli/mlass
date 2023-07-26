@@ -213,5 +213,5 @@ Example::
 
 .. note::
 
-    Amp does not call ``.cuda()`` on any Tensors for you.  Amp assumes that your original script
+    Amp does not call ```` on any Tensors for you.  Amp assumes that your original script
     is already set up to move Tensors from the host to the device as needed.
