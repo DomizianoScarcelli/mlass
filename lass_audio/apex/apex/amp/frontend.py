@@ -9,19 +9,20 @@ class Properties(object):
     and to route setting of these attributes through __setattr__ so that (in theory)
     they can be checked for consistency with other existing args.
     """
+
     def __init__(self):
         self.options = {
-            "enabled" : False,
-            "opt_level" : None,
-            "cast_model_type" : None,
-            "patch_torch_functions" : False,
-            "keep_batchnorm_fp32" : None,
-            "master_weights" : None,
-            "loss_scale" : 1.0,
+            "enabled": False,
+            "opt_level": None,
+            "cast_model_type": None,
+            "patch_torch_functions": False,
+            "keep_batchnorm_fp32": None,
+            "master_weights": None,
+            "loss_scale": 1.0,
             # Reserved for future functionality
             # "fused_optimizer" : False,
             # "enable_ddp_interop" : False,
-            }
+        }
 
     """
     This function allows updating several options at a time without routing through
@@ -39,9 +40,10 @@ class Properties(object):
     The members of "options" are not direct attributes of self, so access attempts
     will roll down to __getattr__.  This borrows from the logic in torch.nn.Module.
     """
+
     def __getattr__(self, name):
         if "options" in self.__dict__:
-            options =  self.__dict__["options"]
+            options = self.__dict__["options"]
             if name in options:
                 return options[name]
         raise AttributeError("'{}' object has no attribute '{}'".format(
@@ -78,7 +80,8 @@ class Properties(object):
                     else:
                         assert (value is True or value is False or value is None),\
                             "keep_batchnorm_fp32 must be a boolean, the string 'True' or 'False', "\
-                            "or None, found keep_batchnorm_fp32={}".format(value)
+                            "or None, found keep_batchnorm_fp32={}".format(
+                                value)
                         self.options[name] = value
                 elif name == "master_weights":
                     if self.opt_level == "O1" and value is not None:
@@ -98,9 +101,10 @@ class Properties(object):
 
 """ O0-O3 are convenience wrappers to establish defaults for typically used mixed precision options. """
 
+
 class O3:
     brief = "O3:  Pure FP16 training."
-    more = "Calls .half() on your model, converting the entire model to FP16.\n"\
+    more = "Calls  on your model, converting the entire model to FP16.\n"\
         "A casting operation is also inserted to cast incoming Tensors to FP16,\n"\
         "so you don't need to change your data pipeline.\n"\
         "This mode is useful for establishing a performance ceiling.\n"\
@@ -110,19 +114,19 @@ class O3:
     def __call__(self, properties):
         properties.enabled = True
         properties.opt_level = "O3"
-        properties.cast_model_type = torch.float16
+        properties.cast_model_type = torch.float32
         properties.patch_torch_functions = False
         properties.keep_batchnorm_fp32 = False
         properties.master_weights = False
         properties.loss_scale = 1.0
         # properties.fused_optimizer = False
         # properties.enable_ddp_interop = False
-        return properties # modified in place so this isn't really necessary
+        return properties  # modified in place so this isn't really necessary
 
 
 class O2:
     brief = "O2:  FP16 training with FP32 batchnorm and FP32 master weights.\n"
-    more = "Calls .half() on your model, converting the entire model (except for batchnorms)\n"\
+    more = "Calls  on your model, converting the entire model (except for batchnorms)\n"\
         "to FP16.  Batchnorms are retained in FP32 for additional stability.\n"\
         "The forward pass is patched to cast incoming Tensors to FP16, so you don't need to change\n"\
         "your data pipeline.\n"\
@@ -133,14 +137,14 @@ class O2:
     def __call__(self, properties):
         properties.enabled = True
         properties.opt_level = "O2"
-        properties.cast_model_type = torch.float16
+        properties.cast_model_type = torch.float32
         properties.patch_torch_functions = False
         properties.keep_batchnorm_fp32 = True
         properties.master_weights = True
         properties.loss_scale = "dynamic"
         # properties.fused_optimizer = False
         # properties.enable_ddp_interop = False
-        return properties # modified in place so this isn't really necessary
+        return properties  # modified in place so this isn't really necessary
 
 
 class O1:
@@ -162,7 +166,7 @@ class O1:
         properties.loss_scale = "dynamic"
         # properties.fused_optimizer = False
         # properties.enable_ddp_interop = False
-        return properties # modified in place so this isn't really necessary
+        return properties  # modified in place so this isn't really necessary
 
 
 class O0:
@@ -181,7 +185,7 @@ class O0:
         properties.loss_scale = 1.0
         # properties.fused_optimizer = False
         # properties.enable_ddp_interop = False
-        return properties # modified in place so this isn't really necessary
+        return properties  # modified in place so this isn't really necessary
 
 
 opt_levels = {"O3": O3(),
@@ -206,7 +210,7 @@ def initialize(
     verbosity=1,
     min_loss_scale=None,
     max_loss_scale=2.**24
-    ):
+):
     """
     Initialize your models, optimizers, and the Torch tensor and functional namespace according to the
     chosen ``opt_level`` and overridden properties, if any.
@@ -323,8 +327,10 @@ def initialize(
             "Options are 'O0', 'O1', 'O2', 'O3'.  Note that in `O0`, `O1`, etc., the prefix O is the letter O, " +
             "not the number zero.")
     else:
-        _amp_state.opt_properties = opt_levels[opt_level](_amp_state.opt_properties)
-        maybe_print("Selected optimization level {}".format(opt_levels[opt_level].brief), True)
+        _amp_state.opt_properties = opt_levels[opt_level](
+            _amp_state.opt_properties)
+        maybe_print("Selected optimization level {}".format(
+            opt_levels[opt_level].brief), True)
         maybe_print("Defaults for this optimization level are:", True)
         for k, v in _amp_state.opt_properties.options.items():
             maybe_print("{:22} : {}".format(k, v), True)
@@ -332,7 +338,8 @@ def initialize(
     _amp_state.min_loss_scale = min_loss_scale
     _amp_state.max_loss_scale = max_loss_scale
 
-    maybe_print("Processing user overrides (additional kwargs that are not None)...", True)
+    maybe_print(
+        "Processing user overrides (additional kwargs that are not None)...", True)
     # I chose to have the keyword arguments listed directly in the argument list,
     # instead of **kwargs, so I can't use kwargs.items() here.
     if enabled is not None:

@@ -16,7 +16,7 @@ def _convert_mlp_traced(l):
 
 def _convert_mlp_traced_fp16(l):
     if isinstance(l, ResAttnBlock):
-        l.mlp = t.jit.trace(l.mlp, t.randn(1, 1, l.n_in).half())
+        l.mlp = t.jit.trace(l.mlp, t.randn(1, 1, l.n_in))
 
 
 class MLP(nn.Module):
@@ -183,7 +183,7 @@ class Transformer(nn.Module):
 
     def forward(self, x, encoder_kv=None, sample=False, fp16=False, fp16_out=False):
         if fp16:
-            x = x.half()
+            x = x
 
         # Blocks
         for i, l in enumerate(self._attn_mods):

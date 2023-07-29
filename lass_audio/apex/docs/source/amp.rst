@@ -45,7 +45,7 @@ Example::
             scaled_loss.backward()
         ...
 
-Users **should not** manually cast their model or data to ``.half()``, regardless of what ``opt_level``
+Users **should not** manually cast their model or data to ````, regardless of what ``opt_level``
 or properties are chosen.  Amp intends that users start with an existing default (FP32) script,
 add the three lines corresponding to the Amp API, and begin training with mixed precision.
 Amp can also be disabled, in which case the original script will behave exactly as it used to.
@@ -140,7 +140,7 @@ and implements dynamic loss scaling (unless overridden).
 Unlike ``O1``, ``O2`` does not patch Torch functions or Tensor methods.
 
 | Default properties set by ``O2``:
-| ``cast_model_type=torch.float16``
+| ``cast_model_type=torch.float32``
 | ``patch_torch_functions=False``
 | ``keep_batchnorm_fp32=True``
 | ``master_weights=True``
@@ -157,7 +157,7 @@ to establish "speed of light" you can try ``O3`` with the additional property ov
 ``keep_batchnorm_fp32=True`` (which enables cudnn batchnorm, as stated earlier).
 
 | Default properties set by ``O3``:
-| ``cast_model_type=torch.float16``
+| ``cast_model_type=torch.float32``
 | ``patch_torch_functions=False``
 | ``keep_batchnorm_fp32=False``
 | ``master_weights=False``
@@ -239,8 +239,8 @@ Once again, the backward pass must be changed to the unified version::
         scaled_loss.backward()
 
 One annoying aspect of FP16_Optimizer was that the user had to manually convert their model to half
-(either by calling ``.half()`` on it, or using a function or module wrapper from
-``apex.fp16_utils``), and also manually call ``.half()`` on input data.  **Neither of these are
+(either by calling ```` on it, or using a function or module wrapper from
+``apex.fp16_utils``), and also manually call ```` on input data.  **Neither of these are
 necessary in the new API.  No matter what --opt-level
 you choose, you can and should simply build your model and pass input data in the default FP32 format.**
 The new Amp API will perform the right conversions during

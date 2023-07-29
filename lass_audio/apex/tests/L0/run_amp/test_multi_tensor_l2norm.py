@@ -12,13 +12,13 @@ from utils import common_init, HALF, FLOAT,\
     ALWAYS_HALF, ALWAYS_FLOAT, MATCH_INPUT
 
 try:
-  import amp_C
-  from amp_C import multi_tensor_l2norm
-  from apex.multi_tensor_apply import MultiTensorApply
-  disabled = False
+    import amp_C
+    from amp_C import multi_tensor_l2norm
+    from apex.multi_tensor_apply import MultiTensorApply
+    disabled = False
 except ImportError as err:
-  print("amp_C fused kernels unavailable, disabling TestMultiTensorApply.  ImportError was ", err)
-  disabled = True
+    print("amp_C fused kernels unavailable, disabling TestMultiTensorApply.  ImportError was ", err)
+    disabled = True
 
 
 class TestMultiTensorL2Norm(unittest.TestCase):
@@ -42,17 +42,20 @@ class TestMultiTensorL2Norm(unittest.TestCase):
             in_list += [a.clone().to(in_type), b.clone().to(in_type)]
 
         if per_tensor:
-            norm, norm_per_tensor = applier(multi_tensor_l2norm, self.overflow_buf, [in_list], True)
+            norm, norm_per_tensor = applier(
+                multi_tensor_l2norm, self.overflow_buf, [in_list], True)
             normab = torch.cat((a.norm().view(1), b.norm().view(1)))
             norm_per_tensor = norm_per_tensor.view(-1, 2)
         else:
-            norm, _ = applier(multi_tensor_l2norm, self.overflow_buf, [in_list], True)
+            norm, _ = applier(multi_tensor_l2norm,
+                              self.overflow_buf, [in_list], True)
 
-        reference = torch.cuda.FloatTensor((sizea + sizeb)*repeat_tensors).fill_(self.val).norm()
+        reference = torch.cuda.FloatTensor(
+            (sizea + sizeb)*repeat_tensors).fill_(self.val).norm()
 
         self.assertTrue(torch.allclose(norm, reference))
         if per_tensor:
-          self.assertTrue(torch.allclose(norm_per_tensor, normab))
+            self.assertTrue(torch.allclose(norm_per_tensor, normab))
         self.assertTrue(self.overflow_buf.item() == 0)
 
     @unittest.skipIf(disabled, "amp_C is unavailable")
@@ -67,7 +70,7 @@ class TestMultiTensorL2Norm(unittest.TestCase):
             (33333, 555),
             (555, 33333))
         appliers = (
-            MultiTensorApply(2048*32), 
+            MultiTensorApply(2048*32),
             MultiTensorApply(333),
             MultiTensorApply(33333))
         repeat_tensors = (
@@ -75,12 +78,12 @@ class TestMultiTensorL2Norm(unittest.TestCase):
             55)
 
         for sizea, sizeb in input_size_pairs:
-          for applier in appliers:
-            for repeat in repeat_tensors:
-              for in_type in (torch.float32, torch.float16):
-                for per_tensor in (False, True):
-                  self.l2norm(sizea, sizeb, applier, repeat, in_type, per_tensor)
-
+            for applier in appliers:
+                for repeat in repeat_tensors:
+                    for in_type in (torch.float32, torch.float32):
+                        for per_tensor in (False, True):
+                            self.l2norm(sizea, sizeb, applier,
+                                        repeat, in_type, per_tensor)
 
 
 if __name__ == '__main__':

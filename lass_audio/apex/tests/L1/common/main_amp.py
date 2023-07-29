@@ -280,8 +280,8 @@ class data_prefetcher():
             [0.229 * 255, 0.224 * 255, 0.225 * 255]).view(1, 3, 1, 1)
         # With Amp, it isn't necessary to manually convert data to half.
         # if args.fp16:
-        #     self.mean = self.mean.half()
-        #     self.std = self.std.half()
+        #     self.mean = self.mean
+        #     self.std = self.std
         self.preload()
 
     def preload(self):
@@ -296,7 +296,7 @@ class data_prefetcher():
             self.next_target = self.next_target.cuda(non_blocking=True)
             # With Amp, it isn't necessary to manually convert data to half.
             # if args.fp16:
-            #     self.next_input = self.next_input.half()
+            #     self.next_input = self.next_input
             # else:
             self.next_input = self.next_input.float()
             self.next_input = self.next_input.sub_(self.mean).div_(self.std)

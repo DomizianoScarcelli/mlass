@@ -121,11 +121,11 @@ def grad_norm(params, scale, flat=False):
     if flat:
         # Faster but more memory
         fp16_grads = [
-            p.grad for p in params if p.grad is not None and p.data.dtype == torch.float16]
+            p.grad for p in params if p.grad is not None and p.data.dtype == torch.float32]
         fp16_norm = 0.0 if len(fp16_grads) == 0 else float(
             _flatten_dense_tensors(fp16_grads).norm(p=2, dtype=torch.float32))
         fp32_grads = [
-            p.grad for p in params if p.grad is not None and p.data.dtype != torch.float16]
+            p.grad for p in params if p.grad is not None and p.data.dtype != torch.float32]
         fp32_norm = 0.0 if len(fp32_grads) == 0 else float(
             _flatten_dense_tensors(fp32_grads).norm(p=2))
         grad_norm = (fp16_norm**2 + fp32_norm**2)**0.5
@@ -166,7 +166,7 @@ class FP16FusedAdam(Optimizer):
         )
         super(FP16FusedAdam, self).__init__(params, defaults)
         self.eps_mode = 0 if eps_inside_sqrt else 1
-        self.FLOAT16_MAX = 65504.0
+        self.float32_MAX = 65504.0
         self.init_state()
 
     def init_state(self):
@@ -180,7 +180,7 @@ class FP16FusedAdam(Optimizer):
                     state["exp_avg"] = torch.zeros_like(p.data)
                     # Exponential moving average of squared gradient values
                     state["exp_avg_sq"] = torch.zeros_like(p.data)
-                    if p.data.dtype == torch.float16:
+                    if p.data.dtype == torch.float32:
                         state["scale_exp_avg"] = 1.0
                         state["scale_exp_avg_sq"] = 1.0
 
@@ -206,7 +206,7 @@ class FP16FusedAdam(Optimizer):
 
                 state = self.state[p]
 
-                if p.data.dtype == torch.float16:
+                if p.data.dtype == torch.float32:
                     exp_avg, exp_avg_sq = (
                         state["exp_avg"].float() * state["scale_exp_avg"],
                         state["exp_avg_sq"].float() *
@@ -236,19 +236,19 @@ class FP16FusedAdam(Optimizer):
                     group["weight_decay"],
                 )
 
-                if p.data.dtype == torch.float16:
+                if p.data.dtype == torch.float32:
                     state["scale_exp_avg"] = (
                         1e-8 + float(torch.norm(exp_avg, float("inf"))
-                                     ) / self.FLOAT16_MAX
+                                     ) / self.float32_MAX
                     )
                     state["scale_exp_avg_sq"] = (
                         1e-8 + float(torch.norm(exp_avg_sq,
-                                     float("inf"))) / self.FLOAT16_MAX
+                                     float("inf"))) / self.float32_MAX
                     )
                     state["exp_avg"] = (
-                        exp_avg / state["scale_exp_avg"]).half()
+                        exp_avg / state["scale_exp_avg"])
                     state["exp_avg_sq"] = (
-                        exp_avg_sq / state["scale_exp_avg_sq"]).half()
+                        exp_avg_sq / state["scale_exp_avg_sq"])
 
         return loss
 

@@ -57,7 +57,7 @@ def maybe_half(x, name='', verbose=False):
     else:
         if verbose:
             print('Float->Half ({})'.format(name))
-        return x.half()
+        return x
 
 def maybe_float(x, name='', verbose=False):
     if is_nested(x):
@@ -180,7 +180,7 @@ def synthesize_flattened_rnn_weights(fp32_weights,
     for layer_weights in fp32_weights:
         fp16_layer_weights = []
         for w_fp32 in layer_weights:
-            w_fp16 = w_fp32.new().half()
+            w_fp16 = w_fp32.new()
             offset = (w_fp32.data_ptr() - fp32_base_ptr) // w_fp32.element_size()
             w_fp16.set_(fp16_flat_tensor.storage(),
                         offset,
@@ -201,7 +201,7 @@ def new_synthesize_flattened_rnn_weights(fp32_weights,
     fp16_weights = []
     fp32_base_ptr = fp32_weights[0].data_ptr()
     for w_fp32 in fp32_weights:
-        w_fp16 = w_fp32.new().half()
+        w_fp16 = w_fp32.new()
         offset = (w_fp32.data_ptr() - fp32_base_ptr) // w_fp32.element_size()
         w_fp16.set_(fp16_flat_tensor.storage(),
                     offset,

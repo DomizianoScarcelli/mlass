@@ -42,7 +42,7 @@ error = 1e-5
 dtype = np.float32
 if args.fp16:
     error = 1e-3
-    dtype = np.float16
+    dtype = np.float32
 elif args.fp64:
     error = 1e-8
     dtype = np.float64
@@ -89,7 +89,7 @@ bn.momentum = 1.0
 bn.weight.data = weight_t.clone()
 bn.bias.data = bias_t.clone()
 if args.fp16:
-    bn.half()
+    bn
 if args.fp64:
     bn.double()
 inp_bn = inp_t.clone().requires_grad_()
@@ -108,7 +108,7 @@ sbn.momentum = 1.0
 sbn.weight.data = weight_t.clone()
 sbn.bias.data = bias_t.clone()
 if args.fp16:
-    sbn.half()
+    sbn
 if args.fp64:
     sbn.double()
 sbn = DDP(sbn)

@@ -12,13 +12,13 @@ from utils import common_init, HALF, FLOAT,\
     ALWAYS_HALF, ALWAYS_FLOAT, MATCH_INPUT
 
 try:
-  import amp_C
-  from amp_C import multi_tensor_axpby
-  from apex.multi_tensor_apply import MultiTensorApply
-  disabled = False
+    import amp_C
+    from amp_C import multi_tensor_axpby
+    from apex.multi_tensor_apply import MultiTensorApply
+    disabled = False
 except ImportError as err:
-  print("amp_C fused kernels unavailable, disabling TestMultiTensorApply.  ImportError was ", err)
-  disabled = True
+    print("amp_C fused kernels unavailable, disabling TestMultiTensorApply.  ImportError was ", err)
+    disabled = True
 
 
 class TestMultiTensorAxpby(unittest.TestCase):
@@ -45,7 +45,8 @@ class TestMultiTensorAxpby(unittest.TestCase):
 
         y_list = []
         for i in range(repeat_tensors):
-            y_list += [t1.clone().to(y_type)*self.yval, t2.clone().to(y_type)*self.yval]
+            y_list += [t1.clone().to(y_type)*self.yval,
+                       t2.clone().to(y_type)*self.yval]
 
         x_list = [x.clone().to(x_type)*(self.xval/self.yval) for x in y_list]
 
@@ -54,7 +55,8 @@ class TestMultiTensorAxpby(unittest.TestCase):
         else:
             out_list = [out.clone().to(out_type)*3.0 for out in y_list]
 
-        applier(multi_tensor_axpby, self.overflow_buf, [x_list, y_list, out_list], self.a, self.b, -1)
+        applier(multi_tensor_axpby, self.overflow_buf, [
+                x_list, y_list, out_list], self.a, self.b, -1)
 
         self.assertTrue(all([torch.allclose(out, self.ref.to(out_type)) for out in out_list]),
                         msg="{} {} {} {} {} {} {}".format(sizea, sizeb, repeat_tensors,
@@ -104,24 +106,23 @@ class TestMultiTensorAxpby(unittest.TestCase):
             55)
 
         for sizea, sizeb in input_size_pairs:
-          for applier in appliers:
-            for repeat in repeat_tensors:
-              for x_type in (torch.float32, torch.float16):
-                for y_type in (torch.float32, torch.float16):
-                  for out_type in (torch.float32, torch.float16):
-                    for inplace in (True, False):
-                      if inplace is True and (y_type is not out_type):
-                        continue
-                      else:
-                        self.axpby(sizea, sizeb, applier, repeat,
-                                   x_type, y_type, out_type, inplace=inplace)
-                      # self.find_inf(sizea, sizeb, applier, repeat, in_type, out_type,
-                      #               0, 0, float('nan'), inplace=inplace)
-                      # self.find_inf(sizea, sizeb, applier, repeat, in_type, out_type,
-                      #               2*repeat-1, sizeb-1, float('inf'), inplace=inplace)
-                      # self.find_inf(sizea, sizeb, applier, repeat, in_type, out_type,
-                      #              2*(repeat//2), sizea//2, float('inf'), inplace=inplace)
-
+            for applier in appliers:
+                for repeat in repeat_tensors:
+                    for x_type in (torch.float32, torch.float32):
+                        for y_type in (torch.float32, torch.float32):
+                            for out_type in (torch.float32, torch.float32):
+                                for inplace in (True, False):
+                                    if inplace is True and (y_type is not out_type):
+                                        continue
+                                    else:
+                                        self.axpby(sizea, sizeb, applier, repeat,
+                                                   x_type, y_type, out_type, inplace=inplace)
+                                    # self.find_inf(sizea, sizeb, applier, repeat, in_type, out_type,
+                                    #               0, 0, float('nan'), inplace=inplace)
+                                    # self.find_inf(sizea, sizeb, applier, repeat, in_type, out_type,
+                                    #               2*repeat-1, sizeb-1, float('inf'), inplace=inplace)
+                                    # self.find_inf(sizea, sizeb, applier, repeat, in_type, out_type,
+                                    #              2*(repeat//2), sizea//2, float('inf'), inplace=inplace)
 
 
 if __name__ == '__main__':

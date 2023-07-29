@@ -6,9 +6,11 @@ import torch
 
 class WrongShapeError(RuntimeError):
     def __init__(self, x: torch.Tensor, target_shape: Sequence[int]):
-        target_shape_str = ",".join(str(d) if d != -1 else "*" for d in target_shape)
+        target_shape_str = ",".join(
+            str(d) if d != -1 else "*" for d in target_shape)
         x_shape_str = ",".join(str(d) for d in x.shape)
-        super().__init__(f"Incorrect shape: expected ({target_shape_str}), got ({x_shape_str}) instead!")
+        super().__init__(
+            f"Incorrect shape: expected ({target_shape_str}), got ({x_shape_str}) instead!")
 
 
 def _check_shape(x: torch.Tensor, target_shape: Sequence[int]):
@@ -41,11 +43,12 @@ class Likelihood(ABC, DevicePortable):
     def _get_log_likelihood(self, x: int) -> Tuple[torch.LongTensor, torch.Tensor]:
         loglikelihood = self.get_log_likelihood(x)
         if not isinstance(loglikelihood, tuple) and len(loglikelihood) == 2:
-            raise RuntimeError(f"Incorrect value: expected tuple of two tensors, got {type(loglikelihood)} instead!")
+            raise RuntimeError(
+                f"Incorrect value: expected tuple of two tensors, got {type(loglikelihood)} instead!")
 
         coords, data = loglikelihood
         _check_dtype(coords, torch.long)
-        _check_dtype(data, [torch.float16, torch.float32])
+        _check_dtype(data, [torch.float32, torch.float32])
 
         _check_shape(coords, [2, -1])
         _check_shape(data, [-1])
@@ -60,7 +63,8 @@ class Likelihood(ABC, DevicePortable):
             return coords, data
 
         if data.max() > 0.0:
-            raise RuntimeError(f"Unexpected value: loglikelihood value is greater than zero: {data.max()} > 0.0")
+            raise RuntimeError(
+                f"Unexpected value: loglikelihood value is greater than zero: {data.max()} > 0.0")
 
         return coords, data
 
@@ -97,7 +101,7 @@ class SeparationPrior(ABC, DevicePortable):
         logits, past_kv = self.get_logits(x, past_key_value)
 
         _check_shape(logits, [-1, self.get_tokens_count()])
-        _check_dtype(logits, [torch.float16, torch.float32])
+        _check_dtype(logits, [torch.float32, torch.float32])
 
         return logits, past_kv
 
@@ -148,4 +152,5 @@ class SeparationPrior(ABC, DevicePortable):
         Returns:
             reordered cache w.r.t. the beam indices.
         """
-        raise NotImplementedError("Implement method in order to use beam-search with cached values!")
+        raise NotImplementedError(
+            "Implement method in order to use beam-search with cached values!")

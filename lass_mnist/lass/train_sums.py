@@ -19,7 +19,7 @@ def train(data_loader, sums, model, args, writer, step):
     for images, _ in data_loader:
         images = images.to(args.device)
         images1 = images[: args.batch_size // 2]
-        images2 = images[args.batch_size // 2 :]
+        images2 = images[args.batch_size // 2:]
         images_mixture = 0.5 * images1 + 0.5 * images2
 
         with torch.no_grad():
@@ -46,7 +46,7 @@ def evaluate(data_loader, sums, model, args, writer, step):
         for images, _ in data_loader:
             images = images.to(args.device)
             images1 = images[: 16 // 2]
-            images2 = images[16 // 2 :]
+            images2 = images[16 // 2:]
             images_mixture = 0.5 * images1 + 0.5 * images2
 
             with torch.no_grad():
@@ -56,7 +56,8 @@ def evaluate(data_loader, sums, model, args, writer, step):
                 codes1 = model.codeBook(z_e_x1)
                 codes2 = model.codeBook(z_e_x2)
                 codes_mixture = model.codeBook(z_e_x_mixture)
-                loss += torch.mean(-torch.log(sums_test[codes1, codes2, codes_mixture] + 1e-16))
+                loss += torch.mean(-torch.log(
+                    sums_test[codes1, codes2, codes_mixture] + 1e-16))
 
         loss /= len(data_loader)
     # Logs
@@ -84,7 +85,8 @@ class SumsEstimationConfig:
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-CONFIG_STORE.store(group="sums_estimation", name="base_sums_estimation", node=SumsEstimationConfig)
+CONFIG_STORE.store(group="sums_estimation",
+                   name="base_sums_estimation", node=SumsEstimationConfig)
 
 
 @hydra.main(version_base=None, config_path=CONFIG_DIR)
@@ -133,7 +135,8 @@ def main(cfg):
     for param in model.parameters():
         param.requires_grad = False
 
-    sums = torch.zeros(cfg.num_codes, cfg.num_codes, cfg.num_codes).to(cfg.device)
+    sums = torch.zeros(cfg.num_codes, cfg.num_codes,
+                       cfg.num_codes).to(cfg.device)
 
     step = 0
     best_loss = -1.0

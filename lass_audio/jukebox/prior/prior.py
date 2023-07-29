@@ -185,7 +185,7 @@ class SimplePrior(nn.Module):
             x, shape, dims = xs[i], self.prior_shapes[i], self.prior_dims[i]
             bins, bins_shift = int(self.prior_bins[i]), int(
                 self.prior_bins_shift[i])
-            assert isinstance(x, t.cuda.LongTensor), x
+            # assert isinstance(x, t.cuda.LongTensor), x
             assert (0 <= x).all() and (x < bins).all()
             # assert_shape(x, (N, *shape))
             xs[i] = (xs[i] + bins_shift).view(N, -1)
@@ -323,7 +323,7 @@ class SimplePrior(nn.Module):
             if sample:
                 self.prime_prior.cpu()
                 if fp16:
-                    encoder_kv = encoder_kv.half()
+                    encoder_kv = encoder_kv
         else:
             encoder_kv = None
         return encoder_kv

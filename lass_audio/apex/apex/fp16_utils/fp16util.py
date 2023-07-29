@@ -9,14 +9,14 @@ class tofp16(nn.Module):
     Utility module that implements::
 
         def forward(self, input):
-            return input.half()
+            return input
     """
 
     def __init__(self):
         super(tofp16, self).__init__()
 
     def forward(self, input):
-        return input.half()
+        return input
 
 
 def BN_convert_float(module):
@@ -38,7 +38,7 @@ def network_to_half(network):
 
     Retained for legacy purposes. It is recommended to use FP16Model.
     """
-    return nn.Sequential(tofp16(), BN_convert_float(network.half()))
+    return nn.Sequential(tofp16(), BN_convert_float(network))
 
 
 def convert_module(module, dtype):
@@ -80,7 +80,7 @@ class FP16Model(nn.Module):
         self.network = convert_network(network, dtype=torch.half)
 
     def forward(self, *inputs):
-        inputs = tuple(t.half() for t in inputs)
+        inputs = tuple(t for t in inputs)
         return self.network(*inputs)
 
 

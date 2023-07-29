@@ -3,6 +3,7 @@ from ..multi_tensor_apply import multi_tensor_applier
 from ._amp_state import _amp_state, master_params, maybe_print
 from itertools import product
 
+
 def scale_check_overflow_python(model_grad, master_grad, scale, check_overflow=False):
     # Exception handling for 18.04 compatibility
     if check_overflow:
@@ -10,11 +11,12 @@ def scale_check_overflow_python(model_grad, master_grad, scale, check_overflow=F
         if cpu_sum == float('inf') or cpu_sum == -float('inf') or cpu_sum != cpu_sum:
             return True
 
-    if master_grad is not model_grad: # copy_ probably internally short-circuits this
+    if master_grad is not model_grad:  # copy_ probably internally short-circuits this
         master_grad.copy_(model_grad)
     if scale != 1.0:
         master_grad.mul_(scale)
     return False
+
 
 def axpby_check_overflow_python(model_grad, stashed_grad, master_grad, scale, check_overflow=False):
     # Exception handling for 18.04 compatibility
@@ -30,6 +32,7 @@ def axpby_check_overflow_python(model_grad, stashed_grad, master_grad, scale, ch
     stashed_grad.add_(scale, converted_model_grad)
     master_grad.data = stashed_grad.data
     return False
+
 
 class LossScaler(object):
     warned_no_fused_kernel = False
@@ -82,7 +85,7 @@ class LossScaler(object):
                         maybe_print(
                             "Attempting to unscale a grad with type {} ".format(master.type()) +
                             "Unscaling non-fp32 grads may indicate an error. "
-                            "When using Amp, you don't need to call .half() on your model.")
+                            "When using Amp, you don't need to call  on your model.")
                         LossScaler.warned_unscaling_non_fp32_grad = True
                 self._has_overflow = scale_check_overflow_python(model,
                                                                  master,
@@ -103,10 +106,10 @@ class LossScaler(object):
 
         if LossScaler.has_fused_kernel:
             # if (not LossScaler.warned_unscaling_non_fp32_grad
-            #     and master_grads[0].dtype == torch.float16):
+            #     and master_grads[0].dtype == torch.float32):
             #     print("Warning:  unscaling grads that are not FP32. "
             #           "Unscaling non-fp32 grads may indicate an error. "
-            #           "When using Amp, you don't need to call .half() on your model.")
+            #           "When using Amp, you don't need to call  on your model.")
             #     # Setting this to True unconditionally allows the possibility of an escape
             #     # if never-before-seen non-fp32 grads are created in some later iteration.
             #     LossScaler.warned_unscaling_non_fp32_grad = True
@@ -136,7 +139,7 @@ class LossScaler(object):
                         maybe_print(
                             "Attempting to unscale a grad with type {} ".format(master.type()) +
                             "Unscaling non-fp32 grads may indicate an error. "
-                            "When using Amp, you don't need to call .half() on your model.")
+                            "When using Amp, you don't need to call  on your model.")
                         LossScaler.warned_unscaling_non_fp32_grad = True
                 self._has_overflow = axpby_check_overflow_python(model,
                                                                  stashed,
@@ -157,10 +160,10 @@ class LossScaler(object):
 
         if LossScaler.has_fused_kernel:
             if (not LossScaler.warned_unscaling_non_fp32_grad
-                and master_grads[0].dtype == torch.float16):
+                    and master_grads[0].dtype == torch.float32):
                 print("Warning:  unscaling grads that are not FP32. "
                       "Unscaling non-fp32 grads may indicate an error. "
-                      "When using Amp, you don't need to call .half() on your model.")
+                      "When using Amp, you don't need to call  on your model.")
                 # Setting this to True unconditionally allows the possibility of an escape
                 # if never-before-seen non-fp32 grads are created in some later iteration.
                 LossScaler.warned_unscaling_non_fp32_grad = True
@@ -169,7 +172,7 @@ class LossScaler(object):
                                  [model_grads, stashed_master_grads, master_grads],
                                  1./scale,
                                  1.0,
-                                 0) # check only arg 0, aka the incoming model grads, for infs
+                                 0)  # check only arg 0, aka the incoming model grads, for infs
         else:
             self.unscale_with_stashed_python(model_grads,
                                              stashed_master_grads,
@@ -194,8 +197,9 @@ class LossScaler(object):
 
         if self._has_overflow and self.dynamic:
             should_skip = True
-            if(self._min_loss_scale):
-                self._loss_scale = max(self._min_loss_scale, self._loss_scale/2.)
+            if (self._min_loss_scale):
+                self._loss_scale = max(
+                    self._min_loss_scale, self._loss_scale/2.)
             else:
                 self._loss_scale = self._loss_scale/2.
             self._unskipped = 0

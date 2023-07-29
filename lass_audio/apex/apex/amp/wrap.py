@@ -7,6 +7,7 @@ import functools
 
 import torch
 
+
 def make_cast_wrapper(orig_fn, cast_fn, handle,
                       try_caching=False):
     @functools.wraps(orig_fn)
@@ -21,12 +22,14 @@ def make_cast_wrapper(orig_fn, cast_fn, handle,
                     args[i] = utils.cached_cast(cast_fn, args[i], handle.cache)
             for k in kwargs:
                 if utils.should_cache(kwargs[k]):
-                    kwargs[k] = utils.cached_cast(cast_fn, kwargs[k], handle.cache)
+                    kwargs[k] = utils.cached_cast(
+                        cast_fn, kwargs[k], handle.cache)
         new_args = utils.casted_args(cast_fn,
                                      args,
                                      kwargs)
         return orig_fn(*new_args, **kwargs)
     return wrapper
+
 
 def cached_cast(mod, fn, cast_fn, handle,
                 try_caching=False, verbose=False):
@@ -41,6 +44,8 @@ def cached_cast(mod, fn, cast_fn, handle,
 # `handle` arg is unused, but simplifies API to make `make_cast_wrapper`
 # Annoyingly, make_promote_wrapper still uses the global handle.  Once everyone
 # is on the new API and I am free to get rid of handle, I can clean this up.
+
+
 def make_promote_wrapper(orig_fn, cast_fn, handle=None):
     @functools.wraps(orig_fn)
     def wrapper(*args, **kwargs):
@@ -62,15 +67,18 @@ def make_promote_wrapper(orig_fn, cast_fn, handle=None):
                                       .format(types))
     return wrapper
 
+
 def promote(mod, fn, handle, verbose=False):
     orig_fn = utils.get_func(mod, fn)
     maybe_float = utils.verbosify(utils.maybe_float, fn, verbose)
     wrapper = make_promote_wrapper(orig_fn, maybe_float)
     utils.set_func_save(handle, mod, fn, wrapper)
 
+
 def sequence_promote(mod, fn, handle, verbose=False):
     orig_fn = utils.get_func(mod, fn)
     maybe_float = utils.verbosify(utils.maybe_float, fn, verbose)
+
     @functools.wraps(orig_fn)
     def wrapper(seq, *args, **kwargs):
         if not _amp_state.handle.is_active():
@@ -89,11 +97,13 @@ def sequence_promote(mod, fn, handle, verbose=False):
             return orig_fn(seq, *args, **kwargs)
     utils.set_func_save(handle, mod, fn, wrapper)
 
+
 def promote_match_arg0(mod, fn, handle, verbose=False):
     if not utils.has_func(mod, fn):
         return
 
     orig_fn = utils.get_func(mod, fn)
+
     @functools.wraps(orig_fn)
     def wrapper(arg0, *args, **kwargs):
         assert compat.is_tensor_like(arg0)
@@ -111,11 +121,13 @@ def promote_match_arg0(mod, fn, handle, verbose=False):
         return orig_fn(arg0, *new_args, **kwargs)
     utils.set_func_save(handle, mod, fn, wrapper)
 
+
 def err_if_any_half(mod, fn, handle, custom_err_msg=None):
     if not utils.has_func(mod, fn):
         return
 
     orig_fn = utils.get_func(mod, fn)
+
     @functools.wraps(orig_fn)
     def wrapper(*args, **kwargs):
         types = utils.collect_fp_tensor_types(args, kwargs)
@@ -129,11 +141,13 @@ def err_if_any_half(mod, fn, handle, custom_err_msg=None):
             return orig_fn(*args, **kwargs)
     utils.set_func_save(handle, mod, fn, wrapper)
 
+
 def err_if_arg0_half(mod, fn, handle, verbose=False):
     if not utils.has_func(mod, fn):
         return
 
     orig_fn = utils.get_func(mod, fn)
+
     @functools.wraps(orig_fn)
     def wrapper(arg0, *args, **kwargs):
         assert compat.is_tensor_like(arg0)
@@ -154,8 +168,11 @@ def err_if_arg0_half(mod, fn, handle, verbose=False):
 # - We interpose on the factory function to:
 #   1) Interpose on the actual forward function and put in casts
 #   2) Insert an fp16 `flat_weight` if necessary
+
+
 def rnn_cast(backend, fn, handle, verbose=False):
     orig_rnn = utils.get_func(backend, fn)
+
     @functools.wraps(orig_rnn)
     def rnn_wrapper(*args, **kwargs):
         flat_weight = kwargs.get('flat_weight')
@@ -170,15 +187,16 @@ def rnn_cast(backend, fn, handle, verbose=False):
             assert utils.type_string(flat_weight) == 'FloatTensor'
             if compat.tensor_is_float_tensor() or compat.tensor_is_variable():
                 # Pre-0.4. A little slower, since it zeros out memory.
-                flat_weight_fp16 = flat_weight.new().half().resize_(flat_weight.shape)
+                flat_weight_fp16 = flat_weight.new().resize_(flat_weight.shape)
             else:
                 flat_weight_fp16 = torch.empty_like(flat_weight,
-                                                    dtype=torch.float16)
+                                                    dtype=torch.float32)
             kwargs['flat_weight'] = flat_weight_fp16
         else:
             flat_weight_fp16 = None
 
         forward = orig_rnn(*args, **kwargs)
+
         @functools.wraps(forward)
         def fwd_wrapper(*fargs, **fkwargs):
             assert len(fargs) == 3 or len(fargs) == 4
@@ -219,6 +237,7 @@ def rnn_cast(backend, fn, handle, verbose=False):
         return fwd_wrapper
     utils.set_func_save(handle, backend, fn, rnn_wrapper)
 
+
 def new_rnn_cast(fn, handle, verbose=False):
     # Forward+backward compatibility around https://github.com/pytorch/pytorch/pull/15744
     # For rnn backend calls that route through _rnn_impls, we must patch the ref
@@ -233,6 +252,7 @@ def new_rnn_cast(fn, handle, verbose=False):
         fn = fn.lower()
     orig_fn = utils.get_func(mod, fn)
     cast_fn = utils.verbosify(utils.maybe_half, fn, verbose)
+
     @functools.wraps(orig_fn)
     def wrapper(*args, **kwargs):
         # Exact call signature from modules/rnn.py
@@ -243,9 +263,9 @@ def new_rnn_cast(fn, handle, verbose=False):
             return orig_fn(*args, **kwargs)
 
         if isinstance(args[6], bool):
-            params_idx = 2 # Not PackedSequence case
+            params_idx = 2  # Not PackedSequence case
         else:
-            params_idx = 3 # PackedSequence case
+            params_idx = 3  # PackedSequence case
 
         new_args = []
         for i, arg in enumerate(args):
@@ -264,11 +284,13 @@ def new_rnn_cast(fn, handle, verbose=False):
         return orig_fn(*new_args)
     utils.set_func_save(handle, mod, fn, wrapper)
 
+
 def disable_casts(mod, fn, handle):
     if not utils.has_func(mod, fn):
         return
 
     orig_fn = utils.get_func(mod, fn)
+
     @functools.wraps(orig_fn)
     def wrapper(*args, **kwargs):
         with handle._disable_casts():

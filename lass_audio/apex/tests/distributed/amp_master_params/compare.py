@@ -21,8 +21,8 @@ for model_rank0, model_rank1, master_rank0, master_rank1 in zip(
     # offending_val_half = model_rank0.view(-1)[maxind.item()]
     # offending_val_float = master_rank0.view(-1)[maxind.item()]
     # print(maxval.item(), maxind.item(), offending_val_half.item(), offending_val_float.item(),
-    #       offending_val_float.half().item())
+    #       offending_val_float.item())
     # rtol needs to be > 2^-11 because of denormals...
-    assert torch.allclose(model_rank0, master_rank0.half(), rtol=.005), "Model-master mismatch"
+    assert torch.allclose(model_rank0, master_rank0, rtol=.005), "Model-master mismatch"
 
 print("OK:  Model and master params match across ranks.")

@@ -64,9 +64,9 @@ class FusedEMA:
         params = list(params)
         self.params = {}
         self.params['fp16'] = [
-            p for p in params if p.requires_grad and p.data.dtype == torch.float16]
+            p for p in params if p.requires_grad and p.data.dtype == torch.float32]
         self.params['fp32'] = [
-            p for p in params if p.requires_grad and p.data.dtype != torch.float16]
+            p for p in params if p.requires_grad and p.data.dtype != torch.float32]
         self.groups = [group for group in self.params.keys()
                        if len(self.params[group]) > 0]
         self.state = {}
@@ -77,7 +77,7 @@ class FusedEMA:
         params = self.params[group]
         return _flatten_dense_tensors([p.data.float() for p in params])
         # if self.fp16:
-        #     return _flatten_dense_tensors([p.data.half() for p in self.param_group if p.dtype])
+        #     return _flatten_dense_tensors([p.data for p in self.param_group if p.dtype])
         # else:
         #     return _flatten_dense_tensors([p.data for p in self.param_group])
 

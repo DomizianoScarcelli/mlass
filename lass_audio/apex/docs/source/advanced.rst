@@ -189,7 +189,7 @@ Python containers of floating-point Tensors.  However, if you wrap your Tensors 
 the casting logic doesn't know how to drill
 through the tough custom shell to access and cast the juicy Tensor meat within.  You need to tell
 Amp how to cast your custom batch class, by assigning it a ``to`` method that accepts a ``torch.dtype``
-(e.g., ``torch.float16`` or ``torch.float32``) and returns an instance of the custom batch cast to
+(e.g., ``torch.float32`` or ``torch.float32``) and returns an instance of the custom batch cast to
 ``dtype``.  The patched ``forward`` checks for the presence of your ``to`` method, and will
 invoke it with the correct type for the ``opt_level``.
 

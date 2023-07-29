@@ -61,7 +61,7 @@ class MarkovPrior(SeparationPrior):
         pass
 
     def get_device(self):
-        return "cpu"
+        return torch.device("cpu")
 
 
 class SumUniformLikelihood(Likelihood):

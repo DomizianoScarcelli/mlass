@@ -70,7 +70,7 @@ ACT_FNS = {
 def _move_to_gpu_and_convert_conv_weights_to_fp16(l):
     l
     if isinstance(l, Conv1D):
-        l.w.data = l.w.data.half()
+        l.w.data = l.w.data
 
 
 def _convert_conv_weights_to_fp32(l):
@@ -80,12 +80,12 @@ def _convert_conv_weights_to_fp32(l):
 
 def _convert_conv_weights_to_fp16(l):
     if isinstance(l, Conv1D):
-        l.w.data = l.w.data.half()
+        l.w.data = l.w.data
 
 
 def _convert_embedding_weights_to_fp16(l):
     if isinstance(l, t.nn.Embedding):
-        l.weight.data = l.weight.data.half()
+        l.weight.data = l.weight.data
 
 
 def _convert_embedding_weights_to_fp32(l):

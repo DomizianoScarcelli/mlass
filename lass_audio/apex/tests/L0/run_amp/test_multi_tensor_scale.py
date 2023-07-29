@@ -12,13 +12,13 @@ from utils import common_init, HALF, FLOAT,\
     ALWAYS_HALF, ALWAYS_FLOAT, MATCH_INPUT
 
 try:
-  import amp_C
-  from amp_C import multi_tensor_scale 
-  from apex.multi_tensor_apply import MultiTensorApply
-  disabled = False
+    import amp_C
+    from amp_C import multi_tensor_scale
+    from apex.multi_tensor_apply import MultiTensorApply
+    disabled = False
 except ImportError as err:
-  print("amp_C fused kernels unavailable, disabling TestMultiTensorApply.  ImportError was ", err)
-  disabled = True
+    print("amp_C fused kernels unavailable, disabling TestMultiTensorApply.  ImportError was ", err)
+    disabled = True
 
 
 class TestMultiTensorScale(unittest.TestCase):
@@ -47,11 +47,13 @@ class TestMultiTensorScale(unittest.TestCase):
         else:
             in_list = [out.clone().to(in_type) for out in out_list]
 
-        applier(multi_tensor_scale, self.overflow_buf, [in_list, out_list], 1./self.scale)
+        applier(multi_tensor_scale, self.overflow_buf,
+                [in_list, out_list], 1./self.scale)
 
-        self.assertTrue(all([torch.allclose(out, self.ref.to(out_type)) for out in out_list]))
+        self.assertTrue(
+            all([torch.allclose(out, self.ref.to(out_type)) for out in out_list]))
         self.assertTrue(self.overflow_buf.item() == 0)
- 
+
     def find_inf(self, sizea, sizeb, applier, repeat_tensors, in_type, out_type, t, ind, val, inplace=False):
         self.overflow_buf.zero_()
         a = torch.cuda.FloatTensor(sizea).fill_(self.scale)
@@ -66,11 +68,13 @@ class TestMultiTensorScale(unittest.TestCase):
         else:
             in_list = [out.clone().to(in_type) for out in out_list]
 
-        applier(multi_tensor_scale, self.overflow_buf, [in_list, out_list], 1./self.scale)
+        applier(multi_tensor_scale, self.overflow_buf,
+                [in_list, out_list], 1./self.scale)
 
         self.overflow_buf.zero_()
         in_list[t][ind] = val
-        applier(multi_tensor_scale, self.overflow_buf, [in_list, out_list], 1./self.scale)
+        applier(multi_tensor_scale, self.overflow_buf,
+                [in_list, out_list], 1./self.scale)
         self.assertTrue(self.overflow_buf.item())
 
     # Currently, the fused kernel gives a hard error if you attempt to downscale
@@ -79,7 +83,7 @@ class TestMultiTensorScale(unittest.TestCase):
     # @unittest.skipIf(disabled, "amp_C is unavailable")
     # def test_fp16_to_fp16(self):
     #     self.downscale(self.fp16, self.fp16, self.fp16_ref)
-    # 
+    #
     # @unittest.skipIf(disabled, "amp_C is unavailable")
     # def test_fp32_to_fp16(self):
     #     self.downscale(self.fp32, self.fp16, self.fp16_ref)
@@ -96,7 +100,7 @@ class TestMultiTensorScale(unittest.TestCase):
             (33333, 555),
             (555, 33333))
         appliers = (
-            MultiTensorApply(2048*32), 
+            MultiTensorApply(2048*32),
             MultiTensorApply(333),
             MultiTensorApply(33333))
         repeat_tensors = (
@@ -104,22 +108,22 @@ class TestMultiTensorScale(unittest.TestCase):
             55)
 
         for sizea, sizeb in input_size_pairs:
-          for applier in appliers:
-            for repeat in repeat_tensors:
-              for in_type in (torch.float32, torch.float16):
-                for out_type in (torch.float32, torch.float16):
-                  for inplace in (True, False):
-                    if inplace is True and (out_type is not in_type):
-                      continue
-                    else:
-                      self.downscale(sizea, sizeb, applier, repeat, in_type, out_type, inplace=inplace)
-                      self.find_inf(sizea, sizeb, applier, repeat, in_type, out_type,
-                                    0, 0, float('nan'), inplace=inplace)
-                      self.find_inf(sizea, sizeb, applier, repeat, in_type, out_type,
-                                    2*repeat-1, sizeb-1, float('inf'), inplace=inplace)
-                      self.find_inf(sizea, sizeb, applier, repeat, in_type, out_type,
-                                   2*(repeat//2), sizea//2, float('inf'), inplace=inplace)
-
+            for applier in appliers:
+                for repeat in repeat_tensors:
+                    for in_type in (torch.float32, torch.float32):
+                        for out_type in (torch.float32, torch.float32):
+                            for inplace in (True, False):
+                                if inplace is True and (out_type is not in_type):
+                                    continue
+                                else:
+                                    self.downscale(
+                                        sizea, sizeb, applier, repeat, in_type, out_type, inplace=inplace)
+                                    self.find_inf(sizea, sizeb, applier, repeat, in_type, out_type,
+                                                  0, 0, float('nan'), inplace=inplace)
+                                    self.find_inf(sizea, sizeb, applier, repeat, in_type, out_type,
+                                                  2*repeat-1, sizeb-1, float('inf'), inplace=inplace)
+                                    self.find_inf(sizea, sizeb, applier, repeat, in_type, out_type,
+                                                  2*(repeat//2), sizea//2, float('inf'), inplace=inplace)
 
 
 if __name__ == '__main__':

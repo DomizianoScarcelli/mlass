@@ -40,10 +40,10 @@ def applier(value, fn):
         return value
     elif isinstance(value, np.ndarray):
         return value
-    elif hasattr(value, "to"): # Allow handling of custom batch classes
+    elif hasattr(value, "to"):  # Allow handling of custom batch classes
         return fn(value)
     elif isinstance(value, container_abcs.Mapping):
-        return {applier(k, fn) : applier(v, fn) for k, v in value.items()}
+        return {applier(k, fn): applier(v, fn) for k, v in value.items()}
     elif isinstance(value, container_abcs.Iterable):
         return type(value)(applier(v, fn) for v in value)
     else:
@@ -69,8 +69,8 @@ def check_models(models):
             parallel_type = "torch.nn.parallel.DataParallel"
         if parallel_type is not None:
             raise RuntimeError("Incoming model is an instance of {}. ".format(parallel_type) +
-                "Parallel wrappers should only be applied to the model(s) AFTER \n"
-                "the model(s) have been returned from amp.initialize.")
+                               "Parallel wrappers should only be applied to the model(s) AFTER \n"
+                               "the model(s) have been returned from amp.initialize.")
 
 
 def check_params_fp32(models):
@@ -79,15 +79,15 @@ def check_params_fp32(models):
             if param.is_floating_point():
                 if 'Half' in param.type():
                     warn_or_err("Found param {} with type {}, expected torch.cuda.FloatTensor.\n"
-                        "When using amp.initialize, you do not need to call .half() on your model\n"
-                        "before passing it, no matter what optimization level you choose.".format(
-                        name, param.type()))
+                                "When using amp.initialize, you do not need to call  on your model\n"
+                                "before passing it, no matter what optimization level you choose.".format(
+                                    name, param.type()))
                 elif not param.is_cuda:
                     warn_or_err("Found param {} with type {}, expected torch.cuda.FloatTensor.\n"
-                        "When using amp.initialize, you need to provide a model with parameters\n"
-                        "located on a CUDA device before passing it no matter what optimization level\n"
-                        "you chose. Use model.to('cuda') to use the default device.".format(
-                        name, param.type()))
+                                "When using amp.initialize, you need to provide a model with parameters\n"
+                                "located on a CUDA device before passing it no matter what optimization level\n"
+                                "you chose. Use model.to('cuda') to use the default device.".format(
+                                    name, param.type()))
 
         # Backward compatibility for PyTorch 0.4
         if hasattr(model, 'named_buffers'):
@@ -95,22 +95,22 @@ def check_params_fp32(models):
         else:
             buf_iter = model._buffers
         for obj in buf_iter:
-            if type(obj)==tuple:
+            if type(obj) == tuple:
                 name, buf = obj
             else:
                 name, buf = obj, buf_iter[obj]
             if buf.is_floating_point():
                 if 'Half' in buf.type():
                     warn_or_err("Found buffer {} with type {}, expected torch.cuda.FloatTensor.\n"
-                        "When using amp.initialize, you do not need to call .half() on your model\n"
-                        "before passing it, no matter what optimization level you choose.".format(
-                        name, buf.type()))
+                                "When using amp.initialize, you do not need to call  on your model\n"
+                                "before passing it, no matter what optimization level you choose.".format(
+                                    name, buf.type()))
                 elif not buf.is_cuda:
                     warn_or_err("Found buffer {} with type {}, expected torch.cuda.FloatTensor.\n"
-                        "When using amp.initialize, you need to provide a model with buffers\n"
-                        "located on a CUDA device before passing it no matter what optimization level\n"
-                        "you chose. Use model.to('cuda') to use the default device.".format(
-                        name, buf.type()))
+                                "When using amp.initialize, you need to provide a model with buffers\n"
+                                "located on a CUDA device before passing it no matter what optimization level\n"
+                                "you chose. Use model.to('cuda') to use the default device.".format(
+                                    name, buf.type()))
 
 
 def check_optimizers(optimizers):
@@ -137,7 +137,7 @@ def wrap_fused_adam(optimizer, properties):
           'loss_scale=float or "dynamic").  We are working on enabling more general usage.'
 
     assert properties.master_weights is True, msg
-    assert properties.cast_model_type is torch.float16, msg
+    assert properties.cast_model_type is torch.float32, msg
     assert (properties.keep_batchnorm_fp32 is False or
             properties.keep_batchnorm_fp32 is None), msg
 
@@ -161,7 +161,8 @@ def _initialize(models, optimizers, properties, num_losses=1, cast_model_outputs
         check_optimizers(optimizers)
     else:
         check_optimizers([optimizers])
-        raise TypeError("optimizers must be either a single optimizer or a list of optimizers.")
+        raise TypeError(
+            "optimizers must be either a single optimizer or a list of optimizers.")
 
     if isinstance(models, torch.nn.Module):
         models_was_list = False
@@ -169,13 +170,13 @@ def _initialize(models, optimizers, properties, num_losses=1, cast_model_outputs
     elif isinstance(models, list):
         models_was_list = True
     else:
-        raise TypeError("models must be either a single model or a list of models.")
+        raise TypeError(
+            "models must be either a single model or a list of models.")
 
     check_models(models)
 
     if not _amp_state.allow_incoming_model_not_fp32:
         check_params_fp32(models)
-
 
     # In the future, when FP16_Optimizer can be deprecated and master weights can
     # become an attribute, remember to stash master weights before casting the model.
@@ -196,7 +197,7 @@ def _initialize(models, optimizers, properties, num_losses=1, cast_model_outputs
 
         for model in models:
             # Patch the forward method to cast incoming data to the correct type, and
-            # outgoing data to float32, so "the user never needs to call .half()."
+            # outgoing data to float32, so "the user never needs to call ."
             # I like writing things explicitly more than decorators.
             def patch_forward(old_fwd):
                 def new_fwd(*args, **kwargs):
@@ -207,7 +208,7 @@ def _initialize(models, optimizers, properties, num_losses=1, cast_model_outputs
 
             model.forward = patch_forward(model.forward)
 
-        # State dict trick to recast any preexisting per-param state tensors 
+        # State dict trick to recast any preexisting per-param state tensors
         for optimizer in optimizers:
             optimizer.load_state_dict(optimizer.state_dict())
     elif cast_model_outputs is not None:
@@ -237,7 +238,8 @@ def _initialize(models, optimizers, properties, num_losses=1, cast_model_outputs
 
     if properties.patch_torch_functions:
         # handle is unused here. It's accessible later through a global value anyway.
-        handle = amp_init(loss_scale=properties.loss_scale, verbose=(_amp_state.verbosity == 2))
+        handle = amp_init(loss_scale=properties.loss_scale,
+                          verbose=(_amp_state.verbosity == 2))
         for optimizer in optimizers:
             # Disable Amp casting for the optimizer step, because it should only be
             # applied to FP32 master params anyway.

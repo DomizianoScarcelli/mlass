@@ -21,7 +21,7 @@ class FP16_Optimizer(object):
 
     Example::
 
-        model = torch.nn.Linear(D_in, D_out).half()
+        model = torch.nn.Linear(D_in, D_out)
         optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
         # Name the FP16_Optimizer instance to replace the existing optimizer
         # (recommended but not required):
@@ -332,7 +332,7 @@ class FP16_Optimizer(object):
 
         Example::
 
-            model = torch.nn.Linear(D_in, D_out).half()
+            model = torch.nn.Linear(D_in, D_out)
             optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
             optimizer = FP16_Optimizer(optimizer, static_loss_scale = 128.0)
             ...

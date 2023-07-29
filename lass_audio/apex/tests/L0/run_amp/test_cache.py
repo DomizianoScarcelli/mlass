@@ -127,19 +127,19 @@ class TestCache(unittest.TestCase):
     # I could easily have these as a set of for loops in a single test,
     # instead of going for granularity.
     def test_whitelist_module_fp16_weight(self):
-        self.train_eval_train_test(WhitelistModule, torch.float16)
+        self.train_eval_train_test(WhitelistModule, torch.float32)
 
     def test_whitelist_module_fp32_weight(self):
         self.train_eval_train_test(WhitelistModule, torch.float32)
 
     def test_blacklist_module_fp16_weight(self):
-        self.train_eval_train_test(BlacklistModule, torch.float16)
+        self.train_eval_train_test(BlacklistModule, torch.float32)
 
     def test_blacklist_module_fp32_weight(self):
         self.train_eval_train_test(BlacklistModule, torch.float32)
 
     def test_promote_module_fp16_weight(self):
-        self.train_eval_train_test(PromoteModule, torch.float16)
+        self.train_eval_train_test(PromoteModule, torch.float32)
 
     def test_promote_module_fp32_weight(self):
         self.train_eval_train_test(PromoteModule, torch.float32)

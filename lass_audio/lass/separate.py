@@ -215,7 +215,7 @@ def main(
     #    raise ValueError(f"Path {save_path} already exists!")
 
     # rank, local_rank, device = setup_dist_from_mpi(port=29533, verbose=True)
-    device = "cpu"
+    device = torch.device("cpu")
 
     # setup models
     vqvae = setup_vqvae(

@@ -463,7 +463,7 @@ class FactoredAttention(nn.Module):
         if sample_t == 0:
             assert self.cache == {}
         else:
-            dtype = {True: t.float16, False: t.float32}[fp16]
+            dtype = {True: t.float32, False: t.float32}[fp16]
             l_cache = self._suff_cache_len()
             assert self.cache['key'].shape == (
                 n_samples, l_cache, self.n_state)
