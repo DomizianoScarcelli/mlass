@@ -16,8 +16,8 @@ RUN pip install --upgrade pip
 COPY lass_audio/requirements.txt .
 RUN python -m pip install -r requirements.txt
 
-WORKDIR /
-COPY . .
+WORKDIR /app
+COPY . /app
 
 # During debugging, this entry point will be overridden. For more information, please refer to https://aka.ms/vscode-docker-python-debug
 # CMD ["python", "-m", "lass_audio.lass.separate"]

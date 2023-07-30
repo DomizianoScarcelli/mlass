@@ -166,6 +166,7 @@ def separate_dataset(
             original_signals=[ori.squeeze(0) for ori in origs],
             path=chunk_path,
         )
+        print(f"chunk {batch_idx+1} saved!")
         del seps, origs
 
 

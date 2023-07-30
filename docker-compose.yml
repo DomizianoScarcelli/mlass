@@ -6,4 +6,5 @@ services:
         build:
             context: .
             dockerfile: ./Dockerfile
-        # command: tail -F anything
+        volumes:
+            - .:/app
