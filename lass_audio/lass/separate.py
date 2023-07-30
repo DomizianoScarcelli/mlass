@@ -183,10 +183,12 @@ def save_separation(
     # assert original_1.shape == original_2.shape == separation_1.shape == separation_2.shape
     assert len(original_signals) == len(separated_signals)
     for i, (ori, sep) in enumerate(zip(original_signals, separated_signals)):
+        print(ori.shape, sep.shape)
         torchaudio.save(str(path / f"ori{i+1}.wav"),
-                        ori.view(-1).cpu(), sample_rate=sample_rate)
+                        ori.cpu(), sample_rate=sample_rate)
         torchaudio.save(str(path / f"sep{i+1}.wav"),
-                        sep.view(-1).cpu(), sample_rate=sample_rate)
+                        sep.cpu(), sample_rate=sample_rate)
+        break
 
 
 def main(
