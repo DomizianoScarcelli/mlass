@@ -9,7 +9,7 @@ import librosa
 import torch
 from torch.utils.data import Dataset
 
-from .utils import get_nonsilent_chunks, load_audio_tracks, load_multiple_audio_tracks
+from .utils import get_nonsilent_chunks, load_audio_tracks, load_multiple_audio_tracks, get_multiple_nonsilent_chunks
 
 
 class SeparationDataset(Dataset, ABC):
@@ -193,10 +193,9 @@ class TrackMultipleDataset(SeparationDataset):
 
     def get_tracks(self, filename: str) -> Tuple[torch.Tensor, torch.Tensor]:
         assert filename in self.filenames
-        # TODO: don't know what this division means, and if it is correct
 
         tracks = load_multiple_audio_tracks(
-            paths=self.dirs / filename,
+            paths=[dir_ / filename for dir_ in self.dirs],
             sample_rate=self.sr,)
 
         # t_channels =  [track.shape[0] for track in tracks]
@@ -215,11 +214,60 @@ class TrackMultipleDataset(SeparationDataset):
         #     )
 
         n_samples = min(t_samples)
-        return (track[:, :n_samples] for track in tracks)
+        return [track[:, :n_samples] for track in tracks]
 
-    def __getitem__(self, item):
+    def __getitem__(self, item) -> List[torch.Tensor]:
         return self.get_tracks(self.filenames[item])
 
     @property
     def sample_rate(self) -> int:
         return self.sr
+
+
+class ChunkedMultipleDataset(TrackMultipleDataset):
+    def __init__(
+        self,
+        instruments_audio_dir: List[Union[str, Path]],
+
+        sample_rate: int,
+        max_chunk_size: int,
+        min_chunk_size: int,
+    ):
+        # Load list of files and starts/durations
+        super().__init__(instruments_audio_dir, sample_rate)
+        self.max_chunk_size = max_chunk_size
+
+        self.available_chunk = {}
+        self.index_to_file, self.index_to_chunk = [], []
+        for file in self.filenames:
+            # TODO: continue this in order to accept more than 2 tracks
+            tracks = self.get_tracks(file)
+            available_chunks = get_multiple_nonsilent_chunks(
+                tracks, max_chunk_size, min_chunk_size
+            )
+            self.available_chunk[file] = available_chunks
+            self.index_to_file.extend([file] * len(available_chunks))
+            self.index_to_chunk.extend(available_chunks)
+
+        assert len(self.index_to_chunk) == len(self.index_to_file)
+
+    @functools.lru_cache(1024)
+    def load_tracks(self, filename: str) -> Tuple[torch.Tensor, torch.Tensor]:
+        return self.get_tracks(filename)
+
+    def __len__(self):
+        return len(self.index_to_file)
+
+    def get_chunk_track(self, item: int) -> str:
+        return self.index_to_file[item]
+
+    def get_chunk_indices(self, item: int) -> Tuple[int, int]:
+        ci = self.index_to_chunk[item]
+        return ci * self.max_chunk_size, (ci + 1) * self.max_chunk_size
+
+    def __getitem__(self, item: int) -> Tuple[torch.Tensor, torch.Tensor, int]:
+        #TODO: make this get a list of n tracks instead of 2 tracks
+        chunk_start, chunk_stop = self.get_chunk_indices(item)
+        t1, t2 = self.load_tracks(self.get_chunk_track(item))
+        t1, t2 = t1[:, chunk_start:chunk_stop], t2[:, chunk_start:chunk_stop]
+        return t1, t2

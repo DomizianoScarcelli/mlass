@@ -97,6 +97,43 @@ def get_nonsilent_chunks(
     return available_chunks
 
 
+def get_multiple_nonsilent_chunks(
+    tracks: List[torch.Tensor],
+    max_chunk_size: int,
+    min_chunk_size: int = 0,
+):
+    """
+    Similarly to :func:`get_nonsilent_chunks`, it gets the chunks for n tracks (instead that just for 2).
+    """
+    for track in tracks:
+        assert_is_audio(track)
+
+    tracks_samples = [track[1] for track in tracks]
+    # Verifying that all tracks samples are the same
+    assert tracks_samples.count(tracks_samples[0]) == len(tracks_samples)
+
+    num_samples = min(tracks_samples)
+    num_chunks = num_samples // max_chunk_size + \
+        int(num_samples % max_chunk_size != 0)
+
+    available_chunks = []
+    for i in range(num_chunks):
+        ms = []
+        m_samples_list = []
+        for track in tracks:
+
+            m = track[:, i * max_chunk_size: (i + 1) * max_chunk_size]
+            _, m_samples = m.shape
+
+            ms.append(m)
+            m_samples.append(m_samples)
+
+        if (not any(is_silent(m) for m in ms)) and all(m_samples >= min_chunk_size for m_samples in m_samples_list):
+            available_chunks.append(i)
+
+    return available_chunks
+
+
 def load_audio_tracks(
     path_1: Union[str, Path], path_2: Union[str, Path], sample_rate: int
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -128,6 +165,8 @@ def load_multiple_audio_tracks(paths: [List[Union[str, Path]]],
 
     assert all(sr == sample_rate for signal,
                sr in all_tracks), f"The sample rates for the tracks in load_multiple_audio_tracks are different from {sample_rate}"
+
+    return [track[0] for track in all_tracks]
 
 
 def assert_is_audio(*signal: Union[torch.Tensor, np.ndarray]):
