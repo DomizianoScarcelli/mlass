@@ -136,4 +136,6 @@ dmypy.json
 # others
 */checkpoints/*
 */data/*
+*/original_data/*
+*/separated-audio/*
 !.gitkeep

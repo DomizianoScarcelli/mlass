@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Union, Tuple, Optional, Sequence, Any
+from typing import Union, Tuple, Optional, Sequence, Any, List
 
 import av
 import numpy as np
@@ -108,6 +108,26 @@ def load_audio_tracks(
     signal_1 = torch.from_numpy(signal_1)
     assert sr_0 == sr_1 == sample_rate
     return signal_0, signal_1
+
+
+def load_multiple_audio_tracks(paths: [List[Union[str, Path]]],
+                               sample_rate: int) -> List[torch.Tensor]:
+    """
+    Returns the list of tuples (signal, sample_rate) for each track in the paths input.
+    It does the same job as load_audio_tracks, but for n paths instead of just 2.
+    """
+    all_tracks: List[Tuple[np.ndarray, int]] = []
+    path: str
+    for path in paths:
+        signal, sr = load_audio(
+            path,
+            sample_rate=sample_rate,
+            audio_layout="mono")
+        signal = torch.from_numpy(signal)
+        all_tracks.append((signal, sr))
+
+    assert all(sr == sample_rate for signal,
+               sr in all_tracks), f"The sample rates for the tracks in load_multiple_audio_tracks are different from {sample_rate}"
 
 
 def assert_is_audio(*signal: Union[torch.Tensor, np.ndarray]):

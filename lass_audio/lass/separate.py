@@ -204,7 +204,7 @@ def main(
     max_sample_tokens: int = 1024,
     sample_rate: int = 44100,
     save_path: str = audio_root / "separated-audio",
-    resume: bool = False,
+    resume: bool = True,
     num_pairs: int = 100,
     seed: int = 0,
     **kwargs,
