@@ -108,6 +108,7 @@ def get_multiple_nonsilent_chunks(
     for track in tracks:
         assert_is_audio(track)
 
+    # TODO: IndexError: index 1 is out of bounds for dimension 0 with size 1
     tracks_samples = [track[1] for track in tracks]
     # Verifying that all tracks samples are the same
     assert tracks_samples.count(tracks_samples[0]) == len(tracks_samples)

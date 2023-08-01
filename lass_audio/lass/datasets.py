@@ -172,26 +172,26 @@ class TrackMultipleDataset(SeparationDataset):
         self.sample_eps = 10.0/221.0
 
         # Load list of files and starts/durations
-        self.dirs = Path(instruments_audio_dir)
+        self.dirs = [Path(dir_) for dir_ in instruments_audio_dir]
         dir_files = [librosa.util.find_files(str(dir)) for dir in self.dirs]
 
         dir_filenames = [set(sorted([Path(f).name for f in dir]))
                          for dir in dir_files]
 
         # TODO: move this in another more meaningful place
-        def get_intersection(dir_filenames):
+        def get_intersection(set_list):
             """Returns the intersection between the list of sets."""
-            intersection = set()
-            for set_ in dir_filenames:
-                intersection.intersection_update(set_)
+            intersection = set_list[0]
+            for set_ in set_list:
+                intersection = intersection.intersection(set_)
             return intersection
 
-        self.filenames = get_intersection(dir_filenames)
+        self.filenames = list(sorted(get_intersection(dir_filenames)))
 
     def __len__(self):
         return len(self.filenames)
 
-    def get_tracks(self, filename: str) -> Tuple[torch.Tensor, torch.Tensor]:
+    def get_tracks(self, filename: str) -> List[torch.Tensor]:
         assert filename in self.filenames
 
         tracks = load_multiple_audio_tracks(
@@ -224,11 +224,11 @@ class TrackMultipleDataset(SeparationDataset):
         return self.sr
 
 
+# TODO: test this
 class ChunkedMultipleDataset(TrackMultipleDataset):
     def __init__(
         self,
         instruments_audio_dir: List[Union[str, Path]],
-
         sample_rate: int,
         max_chunk_size: int,
         min_chunk_size: int,
@@ -240,7 +240,6 @@ class ChunkedMultipleDataset(TrackMultipleDataset):
         self.available_chunk = {}
         self.index_to_file, self.index_to_chunk = [], []
         for file in self.filenames:
-            # TODO: continue this in order to accept more than 2 tracks
             tracks = self.get_tracks(file)
             available_chunks = get_multiple_nonsilent_chunks(
                 tracks, max_chunk_size, min_chunk_size
@@ -265,9 +264,8 @@ class ChunkedMultipleDataset(TrackMultipleDataset):
         ci = self.index_to_chunk[item]
         return ci * self.max_chunk_size, (ci + 1) * self.max_chunk_size
 
-    def __getitem__(self, item: int) -> Tuple[torch.Tensor, torch.Tensor, int]:
-        #TODO: make this get a list of n tracks instead of 2 tracks
+    def __getitem__(self, item: int) -> List[torch.Tensor]:
         chunk_start, chunk_stop = self.get_chunk_indices(item)
-        t1, t2 = self.load_tracks(self.get_chunk_track(item))
-        t1, t2 = t1[:, chunk_start:chunk_stop], t2[:, chunk_start:chunk_stop]
-        return t1, t2
+        tracks = self.load_tracks(self.get_chunk_track(item))
+        tracks = [t[:, chunk_start:chunk_stop] for t in tracks]
+        return tracks
