@@ -52,6 +52,7 @@ def test_pair_datasets():
 
 
 def test_get_multiple_non_silent_chunks():
+    # This is implicit since if test_chunk_datasets works, then this has to work too.
     raise NotImplementedError()
 
 
@@ -76,5 +77,5 @@ def test_chunk_datasets():
 
 
 if __name__ == "__main__":
-    # test_pair_datasets()
+    test_pair_datasets()
     test_chunk_datasets()
