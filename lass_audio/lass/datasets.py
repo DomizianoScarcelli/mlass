@@ -9,7 +9,7 @@ import librosa
 import torch
 from torch.utils.data import Dataset
 
-from .utils import get_nonsilent_chunks, load_audio_tracks, load_multiple_audio_tracks, get_multiple_nonsilent_chunks
+from .utils import get_nonsilent_chunks, load_audio_tracks, load_multiple_audio_tracks, get_multiple_nonsilent_chunks, get_intersection
 
 
 class SeparationDataset(Dataset, ABC):
@@ -178,14 +178,6 @@ class TrackMultipleDataset(SeparationDataset):
         dir_filenames = [set(sorted([Path(f).name for f in dir]))
                          for dir in dir_files]
 
-        # TODO: move this in another more meaningful place
-        def get_intersection(set_list):
-            """Returns the intersection between the list of sets."""
-            intersection = set_list[0]
-            for set_ in set_list:
-                intersection = intersection.intersection(set_)
-            return intersection
-
         self.filenames = list(sorted(get_intersection(dir_filenames)))
 
     def __len__(self):
@@ -224,7 +216,6 @@ class TrackMultipleDataset(SeparationDataset):
         return self.sr
 
 
-# TODO: test this
 class ChunkedMultipleDataset(TrackMultipleDataset):
     def __init__(
         self,

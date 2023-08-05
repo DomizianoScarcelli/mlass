@@ -139,3 +139,4 @@ dmypy.json
 */original_data/*
 */separated-audio/*
 !.gitkeep
+*.old

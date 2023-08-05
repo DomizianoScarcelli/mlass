@@ -248,3 +248,11 @@ def get_dataset_subsample(data_length: int, num_samples: Optional[int] = None, s
     generator = torch.Generator()
     generator.manual_seed(seed)
     return torch.randperm(data_length, generator=generator)[:num_samples].tolist()
+
+
+def get_intersection(set_list):
+    """Returns the intersection between the list of sets."""
+    intersection = set_list[0]
+    for set_ in set_list:
+        intersection = intersection.intersection(set_)
+    return intersection
