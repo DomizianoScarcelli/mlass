@@ -3,15 +3,14 @@ from pathlib import Path
 from lass_audio.lass.datasets import ChunkedMultipleDataset
 from lass_audio.lass.multi_separate import SumProductSeparator
 import torch
-from lass_audio.lass.utils import decode_latent_codes, setup_priors, setup_vqvae
+from lass_audio.lass.utils import decode_latent_codes, setup_priors, setup_vqvae, get_raw_to_tokens
 from lass_audio.lass.diba_interfaces import JukeboxPrior, SparseLikelihood
 
 
 class MockData():
-    # TODO: unisci mock data e config
     def __init__(self):
-        self.num_sources = 2
-        self.time_steps = 1024
+        self.NUM_SOURCES = 2
+        self.TIME_STEPS = 1024
 
         audio_root = Path(__file__).parent.parent.parent
         audio_dir_1 = audio_root / "data/bass"
@@ -20,17 +19,6 @@ class MockData():
         SAMPLE_RATE = 44100
 
         AUDIO_DIRS = [audio_dir_1, audio_dir_2]
-
-        self.dataset = ChunkedMultipleDataset(
-            instruments_audio_dir=AUDIO_DIRS,
-            sample_rate=SAMPLE_RATE,
-            max_chunk_size=50,
-            min_chunk_size=10)
-
-
-class Config():
-    def __init__(self):
-        audio_root = Path(__file__).parent.parent.parent
 
         vqvae_path: str = audio_root / "checkpoints/vqvae.pth.tar"
         prior_1_path: str = audio_root / "checkpoints/prior_bass_44100.pth.tar"
@@ -85,21 +73,24 @@ class Config():
             likelihood=SparseLikelihood(sum_frequencies_path, device, 3.0),
         )
 
-        # print(f"Priors: {priors}")
+        raw_to_tokens = get_raw_to_tokens(vqvae.strides_t, vqvae.downs_t)
+
+        self.dataset = ChunkedMultipleDataset(
+            instruments_audio_dir=AUDIO_DIRS,
+            sample_rate=SAMPLE_RATE,
+            max_chunk_size=raw_to_tokens * self.TIME_STEPS,
+            min_chunk_size=raw_to_tokens)
 
 
 class MultiSeparateTest(unittest.TestCase):
     def test_initialize_graphical_model(self):
         data = MockData()
-        config = Config()
-        separator = config.separator
+        separator = data.separator
 
         separator.initialize_graphical_model(
             dataset=data.dataset,
-            num_sources=data.num_sources,
-            time_steps=data.time_steps)
-
-        print("Everything was properly set up, let's test the separator")
+            num_sources=data.NUM_SOURCES,
+            time_steps=data.TIME_STEPS)
 
         mixture = torch.randn((1024,))
         separator.separate(mixture=mixture)

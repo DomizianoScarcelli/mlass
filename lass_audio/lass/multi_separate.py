@@ -20,10 +20,8 @@ from lass_audio.lass.datasets import ChunkedMultipleDataset
 
 from pgmpy.models import DynamicBayesianNetwork as DBN
 from pgmpy.models import BayesianNetwork
-from pgmpy.estimators import BayesianEstimator, MaximumLikelihoodEstimator
 from pgmpy.inference import VariableElimination
 
-import pandas as pd
 
 audio_root = Path(__file__).parent.parent
 
@@ -78,13 +76,25 @@ class SumProductSeparator(Separator):
 
         loader = DataLoader(dataset, batch_size=1, num_workers=0)
 
+        batch_count = 0
         for batch_idx, batch in enumerate(tqdm(loader)):
             origs = batch
             # TODO: generalize for more than 2 sources, using the MultiDatasets
             ori_1, ori_2 = origs
             mixture = (0.5 * ori_1 + 0.5 * ori_2).squeeze(0)
 
-            # TODO: add nodes and edges for the graph here
+            # print(f"Origin 1: {ori_1} with shape {ori_1.shape}")
+            # print(f"Origin 2: {ori_2} with shape {ori_2.shape}")
+
+            # print(f"Mixture codes: {self.encode_fn(mixture)}")
+            batch_count += 1
+            # break
+        print(
+            f"Length of the dataset: {len(dataset)}. Number of batches: {batch_count}", )
+
+        # TODO: add nodes and edges for the graph here
+
+        # TODO: see how I can continue from here
 
         # Step 2: Add nodes and edges to the model based on the dependencies between variables
 
@@ -119,8 +129,9 @@ class SumProductSeparator(Separator):
         # TODO:
         # Step 3: Parameterize the graph with prior and likelihood values
         # You'll need to define Conditional Probability Distributions (CPDs) for each node in the graph
-        # based on your prior probabilities and likelihood values. Use MaximumLikelihoodEstimator or other
-        # methods to estimate CPDs from your data.
+        # based on your prior probabilities and likelihood values.
+
+        # (GPT help)[https://chat.openai.com/share/a20bcbfd-5970-449f-b9f4-baa2f97e61a6]
 
         # TODO:
         # Step 4: Perform Inference and Sample each source z_i from P(z_i | m)
