@@ -6,7 +6,7 @@ from typing import Callable, List, Mapping
 import numpy as np
 import torch
 import torchaudio
-import tqdm
+from tqdm import tqdm
 from diba.diba import Likelihood
 from torch.utils.data import DataLoader
 from diba.diba.interfaces import SeparationPrior
@@ -19,9 +19,9 @@ from lass_audio.lass.datasets import ChunkedMultipleDataset
 
 
 from pgmpy.models import DynamicBayesianNetwork as DBN
-from pgmpy.models.DynamicBayesianNetwork import DynamicNode
-from pgmpy.models import BayesianModel
-from pgmpy.estimators import BayesianEstimator
+from pgmpy.models import BayesianNetwork
+from pgmpy.estimators import BayesianEstimator, MaximumLikelihoodEstimator
+from pgmpy.inference import VariableElimination
 
 import pandas as pd
 
@@ -55,40 +55,6 @@ class SumProductSeparator(Separator):
         # lambda x: decode_latent_codes(vqvae, x.squeeze(0), level=vqvae_level)
         self.decode_fn = decode_fn
 
-    def initialize_graphical_model(self, num_latent_variables, S) -> DBN:
-        # Create a new Dynamic Bayesian Network
-        # Sample data for demonstration
-        latent_code = torch.randint(0, 1024, (1024,)).numpy()
-
-        # Create a directed graphical model
-        model = BayesianModel()
-
-        # Add nodes (latent variables) to the model
-        for i in range(1, 1025):
-            model.add_node(f"z{i}")
-
-        # Add edges (dependencies) between nodes in the model
-        # Define the dependencies based on your problem requirements
-        # For example, you could assume a linear chain structure: z1 -> z2 -> z3 -> ... -> z1024
-        for i in range(1, 1024):
-            model.add_edge(f"z{i}", f"z{i+1}")
-
-        # Fit CPDs using Maximum Likelihood Estimation
-        # This assumes you have data that associates each latent variable z_i with the observed signal m
-        data = pd.DataFrame({f"z{i}": [latent_code[i-1]]
-                            for i in range(1, 1025)})
-
-        be = BayesianEstimator(model, data)
-        for i in range(1, 1025):
-            cpd = be.estimate_cpd(
-                f"z{i}", prior_type="BDeu", equivalent_sample_size=10)
-            model.add_cpds(cpd)
-
-        # Check if the model is valid and consistent
-        assert model.check_model()
-
-        self._print_graph(model)
-
     def _print_graph(self, graph: DBN):
         print("Nodes in the graph:")
         print(graph.nodes())
@@ -102,31 +68,97 @@ class SumProductSeparator(Separator):
             print(f"\nCPD for node '{node}':")
             print(cpd)
 
+    def initialize_graphical_model(self,
+                                   dataset: SeparationDataset,
+                                   num_sources: int,
+                                   time_steps: int) -> DBN:
+
+        # Step 1: Define the Directed Graphical Model
+        model = BayesianNetwork()
+
+        loader = DataLoader(dataset, batch_size=1, num_workers=0)
+
+        for batch_idx, batch in enumerate(tqdm(loader)):
+            origs = batch
+            # TODO: generalize for more than 2 sources, using the MultiDatasets
+            ori_1, ori_2 = origs
+            mixture = (0.5 * ori_1 + 0.5 * ori_2).squeeze(0)
+
+            # TODO: add nodes and edges for the graph here
+
+        # Step 2: Add nodes and edges to the model based on the dependencies between variables
+
+        # In our case, we will connect each z_i^{t-1} to z_i^{t}, and each z_i to m.
+        sources_nodes = [f"z_{i}_{t}" for i in range(
+            num_sources) for t in range(time_steps)]
+        mixture_nodes = [f"m_{t}" for t in range(time_steps)]
+
+        model.add_nodes_from(sources_nodes + mixture_nodes)
+
+        # Add edges for t_i_{t-1} -> t_i_{t} (Temporal dependency for the latent sources)
+        for i in range(num_sources):
+            for t in range(time_steps):
+                if t == time_steps:
+                    break
+                start = f"z_{i}_{t}"
+                end = f"z_{i}_{t+1}"
+
+                model.add_edge(start, end)
+
+        # print("Model edges: ", model.edges())
+
+        # Add edges for m_{t-1} -> m_{t} (Temporal dependency for the mixture signal)
+        for t in range(time_steps):
+            if t == time_steps:
+                break
+            start = f"m_{t}"
+            end = f"m_{t+1}"
+
+            model.add_edge(start, end)
+
+        # TODO:
+        # Step 3: Parameterize the graph with prior and likelihood values
+        # You'll need to define Conditional Probability Distributions (CPDs) for each node in the graph
+        # based on your prior probabilities and likelihood values. Use MaximumLikelihoodEstimator or other
+        # methods to estimate CPDs from your data.
+
+        # TODO:
+        # Step 4: Perform Inference and Sample each source z_i from P(z_i | m)
+        inference = VariableElimination(model)
+
+        for i in range(num_sources):  # Assuming you know the number of sources
+            # Assuming the evidence is observed as 1
+            evidence = {f"z_{i+1}": 1}
+            result = inference.map_query(
+                variables=[f"z_{i+1}"], evidence=evidence)
+            sampled_z_i = result[f"z_{i+1}"]
+
+            # Now 'sampled_z_i' contains the sampled value of 'z_i' from P(z_i | m) while marginalizing out other z_j's.
+
+            # You can repeat this step for all sources to sample each one individually.
+
+        self._print_graph(model)
+
     @torch.no_grad()
     def separate(self, mixture: torch.Tensor) -> Mapping[str, torch.Tensor]:
-        # convert signal to codes
         device = "cpu"
 
         mixture_codes = self.encode_fn(mixture)
 
         mixture_len = len(mixture)
 
-        graph = self.initialize_graphical_model(
-            num_latent_variables=3, S=mixture_len)
+        # Prior = P(z_i)
 
-        num_samples = 2  # NOTE: dummy variable for now
+        # Conditional Probability = P(z_i | m)
 
-        xs_0, xs_1 = torch.full((2, num_samples, mixture_len + 1),
-                                fill_value=-1, dtype=torch.long, device=device)
-        # TODO: change in order to be more than 2
-        xs_0[:, 0], xs_1[:, 0] = [p.get_sos() for p in self.priors]
+        # Likelihood = P(m | z_i)
 
-        # TODO: I don't know if I need this for the graphical model
-        past_0, past_1 = None, None
-        for sample_t in range(mixture_len):
-            # Loop for each mixture element
+        # Since len(z_i) and len(m) = 1024, all the probabilities are also torch.Tensors of length 1024
 
-            pass
+        CONSIDERED_TOKEN_IDX = 1
+        # This is the frequency count tensor of rank K ^ {num_sources + 1} (3 in case of 2 sources).
+        ll_coords, ll_data = self.likelihood._get_log_likelihood(
+            x=mixture[CONSIDERED_TOKEN_IDX])
 
 
 # -----------------------------------------------------------------------------
@@ -262,9 +294,10 @@ def main(
         **kwargs,
     )
 
-    graph = separator.initialize_graphical_model(5, 20)
+    graph = separator.initialize_graphical_model()
     # separator._print_graph(graph)
 
+    # TODO: Early return for debugging
     return
 
     # setup dataset
