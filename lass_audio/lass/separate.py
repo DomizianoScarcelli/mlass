@@ -55,6 +55,8 @@ class BeamsearchSeparator(Separator):
     @torch.no_grad()
     def separate(self, mixture: torch.Tensor) -> Mapping[str, torch.Tensor]:
         # convert signal to codes
+
+        print("The mixture code shape when beam separating is: ", mixture.shape)
         mixture_codes = self.encode_fn(mixture)
 
         # separate mixture (x has shape [2, num. tokens])

@@ -1,9 +1,8 @@
 import abc
 import functools
 from pathlib import Path
-from typing import Callable, List, Mapping
+from typing import Callable, List, Mapping, Dict
 
-import numpy as np
 import torch
 import torchaudio
 from tqdm import tqdm
@@ -53,6 +52,8 @@ class SumProductSeparator(Separator):
         # lambda x: decode_latent_codes(vqvae, x.squeeze(0), level=vqvae_level)
         self.decode_fn = decode_fn
 
+        self.device = torch.device("cpu")
+
     def _print_graph(self, graph: DBN):
         print("Nodes in the graph:")
         print(graph.nodes())
@@ -68,93 +69,155 @@ class SumProductSeparator(Separator):
 
     def initialize_graphical_model(self,
                                    dataset: SeparationDataset,
-                                   num_sources: int,
-                                   time_steps: int) -> DBN:
+                                   num_sources: int) -> Dict[int, BayesianNetwork]:
 
         # Step 1: Define the Directed Graphical Model
-        model = BayesianNetwork()
+        # model = BayesianNetwork()
 
         loader = DataLoader(dataset, batch_size=1, num_workers=0)
 
-        batch_count = 0
+        models: Dict[int, BayesianNetwork] = {}
+
+        batch: List[torch.Tensor]
         for batch_idx, batch in enumerate(tqdm(loader)):
-            origs = batch
-            # TODO: generalize for more than 2 sources, using the MultiDatasets
-            ori_1, ori_2 = origs
-            mixture = (0.5 * ori_1 + 0.5 * ori_2).squeeze(0)
+            # Here I have two choices:
+            # - One graph per tuple of sources, meaning num_batches total graphs, but small. This is good since the mixture only depends on the tuple of sources.
+            # - One graph per dataset, meaning 1 single graph but huge. This is good in order to capture patterns.
+            # Since the source influece only the mixture, and the priors capture other pieces of information needed, we will choose the first option.
+            print("Batch: ", batch, torch.tensor(batch[0]).shape)
+            sources = batch
+            weight = 1 / num_sources
 
-            # print(f"Origin 1: {ori_1} with shape {ori_1.shape}")
-            # print(f"Origin 2: {ori_2} with shape {ori_2.shape}")
+            mixture = torch.tensor(
+                [(source * weight).tolist() for source in sources]).sum(dim=0).squeeze(0)
 
-            # print(f"Mixture codes: {self.encode_fn(mixture)}")
-            batch_count += 1
-            # break
-        print(
-            f"Length of the dataset: {len(dataset)}. Number of batches: {batch_count}", )
+            time_steps = mixture.shape[-1]
 
-        # TODO: add nodes and edges for the graph here
+            print(f"The time steps are: {time_steps}")
+            print(f"The mixture shape is: {mixture.shape}")
 
-        # TODO: see how I can continue from here
+            model = BayesianNetwork()
 
-        # Step 2: Add nodes and edges to the model based on the dependencies between variables
+            sources_nodes = [f"z_{i}_{t}" for i in range(
+                num_sources) for t in range(time_steps)]
+            mixture_nodes = [f"m_{t}" for t in range(time_steps)]
 
-        # In our case, we will connect each z_i^{t-1} to z_i^{t}, and each z_i to m.
-        sources_nodes = [f"z_{i}_{t}" for i in range(
-            num_sources) for t in range(time_steps)]
-        mixture_nodes = [f"m_{t}" for t in range(time_steps)]
+            model.add_nodes_from(sources_nodes + mixture_nodes)
 
-        model.add_nodes_from(sources_nodes + mixture_nodes)
+            # Add edges for t_i_{t-1} -> t_i_{t} (Temporal dependency for the latent sources)
+            for i in range(num_sources):
+                for t in tqdm(range(time_steps), desc=f"Temporal dependency for the latent source z_{i}"):
+                    if t == time_steps - 1:  # Skip the last time step
+                        break
+                    start = f"z_{i}_{t}"
+                    end = f"z_{i}_{t+1}"
+                    mixture_node = f"m_{t}"
 
-        # Add edges for t_i_{t-1} -> t_i_{t} (Temporal dependency for the latent sources)
-        for i in range(num_sources):
-            for t in range(time_steps):
-                if t == time_steps:
+                    model.add_edge(start, mixture_node)
+                    model.add_edge(start, end)
+
+            # Add edges for m_{t-1} -> m_{t} (Temporal dependency for the mixture signal)
+            for t in tqdm(range(time_steps), desc="Temporal dependency for the mixture signal"):
+                if t == time_steps - 1:  # Skip the last time step
                     break
-                start = f"z_{i}_{t}"
-                end = f"z_{i}_{t+1}"
+                start = f"m_{t}"
+                end = f"m_{t+1}"
 
                 model.add_edge(start, end)
 
-        # print("Model edges: ", model.edges())
+            # TODO: verify the correctness of this step
+            # STEP 2: Add CPDs considering priors and likelihood
+            # TODO: generalize for more than 2 sources, now this is just for debug reasons
 
-        # Add edges for m_{t-1} -> m_{t} (Temporal dependency for the mixture signal)
-        for t in range(time_steps):
-            if t == time_steps:
-                break
-            start = f"m_{t}"
-            end = f"m_{t+1}"
+            # self.priors is a list of a neural network that expose a _get_logits method
+            prior_0, prior_1 = self.priors
 
-            model.add_edge(start, end)
+            # TODO: in order to compute the logits, you can see how it's done in `diba._ancestral_sample``
+            mixture_codes = self.encode_fn(mixture)
 
-        # TODO:
-        # Step 3: Parameterize the graph with prior and likelihood values
-        # You'll need to define Conditional Probability Distributions (CPDs) for each node in the graph
-        # based on your prior probabilities and likelihood values.
+            DEBUG_NUM_SOURCES = 2
+            # TODO: this is used inside of beam_search and it corresponds to the number of beans to keep, IDK what should be its value in this context
+            DEBUG_NUM_CURRENT_BEAMS = 1
+            xs_0, xs_1 = torch.full((DEBUG_NUM_SOURCES, DEBUG_NUM_CURRENT_BEAMS, time_steps + 1),
+                                    fill_value=-1, dtype=torch.long, device=self.device)
 
-        # (GPT help)[https://chat.openai.com/share/a20bcbfd-5970-449f-b9f4-baa2f97e61a6]
+            # NOTE: in this case p.get_sos() returns the value 0
+            xs_0[:, 0], xs_1[:, 0] = [p.get_sos() for p in self.priors]
+            past_0, past_1 = (None, None)
 
-        # TODO:
-        # Step 4: Perform Inference and Sample each source z_i from P(z_i | m)
-        inference = VariableElimination(model)
+            print(f"Xs_0 is: {xs_0} with shape {xs_0.shape}")
+            print(f"Xs_0 is: {xs_1} with shape {xs_1.shape}")
 
-        for i in range(num_sources):  # Assuming you know the number of sources
-            # Assuming the evidence is observed as 1
-            evidence = {f"z_{i+1}": 1}
-            result = inference.map_query(
-                variables=[f"z_{i+1}"], evidence=evidence)
-            sampled_z_i = result[f"z_{i+1}"]
+            DEBUG_NUM_CURRENT_BEAMS = 1
+            for t in tqdm(range(time_steps), desc="Loop over all the time steps"):
+                # compute log priors
+                log_p_0, past_0 = prior_0._get_logits(
+                    xs_0[:DEBUG_NUM_CURRENT_BEAMS, : t + 1], past_0)
+                log_p_1, past_1 = prior_1._get_logits(
+                    xs_1[:DEBUG_NUM_CURRENT_BEAMS, : t + 1], past_1)
+
+                print("Log_p_0: ", log_p_0, " with shape ", log_p_0.shape)
+                print("Log_p_1: ", log_p_1, " with shape ", log_p_1.shape)
+
+                current_mixture_token = mixture_codes[t]
+
+                # Likelihood for the current mixture token in sparse tensor format
+                print("current mixture token: ", current_mixture_token)
+                ll_coords, ll_data = self.likelihood._get_log_likelihood(
+                    current_mixture_token)
+
+                print("Done, ll_coords: ", ll_coords,
+                      " with shape: ", ll_coords.shape)
+
+            # print(f"""
+            #     Logits 1: {logits_1} with shape {logits_1.shape}
+            #     Logits 2: {logits_2} with shape {logits_2.shape}
+            #       """)
+
+            # Add the model to the list of models
+            models[batch_idx] = model
+
+            print(
+                f"Length of the dataset and number of batches: {len(dataset)}")
+
+            print(
+                f"model after step 1 is: {model}")
+
+            raise RuntimeError("STOP HERE MAN!")
+
+            # TODO:
+            # Step 3: Parameterize the graph with prior and likelihood values
+            # You'll need to define Conditional Probability Distributions (CPDs) for each node in the graph
+            # based on your prior probabilities and likelihood values.
+
+            # Iterate through each latent source and time step
+
+            # (GPT help)[https://chat.openai.com/share/a20bcbfd-5970-449f-b9f4-baa2f97e61a6]
+
+            # TODO:
+            # Step 4: Perform Inference and Sample each source z_i from P(z_i | m)
+            # inference = VariableElimination(model)
+
+            # for i in range(num_sources):  # Assuming you know the number of sources
+            #     # Assuming the evidence is observed as 1
+            #     evidence = {f"z_{i+1}": 1}
+            #     result = inference.map_query(
+            #         variables=[f"z_{i+1}"], evidence=evidence)
+            #     sampled_z_i = result[f"z_{i+1}"]
 
             # Now 'sampled_z_i' contains the sampled value of 'z_i' from P(z_i | m) while marginalizing out other z_j's.
 
             # You can repeat this step for all sources to sample each one individually.
 
-        self._print_graph(model)
+            # self._print_graph(model)
 
     @torch.no_grad()
     def separate(self, mixture: torch.Tensor) -> Mapping[str, torch.Tensor]:
-        device = "cpu"
 
         mixture_codes = self.encode_fn(mixture)
+
+        print(
+            f"Mixture codes are: {mixture_codes} with shape: {torch.tensor(mixture_codes).shape}")
 
         mixture_len = len(mixture)
 
@@ -169,7 +232,7 @@ class SumProductSeparator(Separator):
         CONSIDERED_TOKEN_IDX = 1
         # This is the frequency count tensor of rank K ^ {num_sources + 1} (3 in case of 2 sources).
         ll_coords, ll_data = self.likelihood._get_log_likelihood(
-            x=mixture[CONSIDERED_TOKEN_IDX])
+            x=mixture[0, CONSIDERED_TOKEN_IDX])  # TODO: don't know what this is lol
 
 
 # -----------------------------------------------------------------------------

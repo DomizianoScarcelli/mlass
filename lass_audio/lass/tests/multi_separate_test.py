@@ -89,10 +89,11 @@ class MultiSeparateTest(unittest.TestCase):
 
         separator.initialize_graphical_model(
             dataset=data.dataset,
-            num_sources=data.NUM_SOURCES,
-            time_steps=data.TIME_STEPS)
+            num_sources=data.NUM_SOURCES)
 
-        mixture = torch.randn((1024,))
+        # Shape taken from the BeamSearch separator
+        # mixture = torch.randn((1, 131072))
+        mixture = torch.randn((1, 1024))
         separator.separate(mixture=mixture)
 
 
