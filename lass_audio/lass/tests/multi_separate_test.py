@@ -91,10 +91,7 @@ class MultiSeparateTest(unittest.TestCase):
             dataset=data.dataset,
             num_sources=data.NUM_SOURCES)
 
-        # Shape taken from the BeamSearch separator
-        # mixture = torch.randn((1, 131072))
-        mixture = torch.randn((1, 1024))
-        separator.separate(mixture=mixture)
+        separator.separate()
 
 
 if __name__ == "__main__":

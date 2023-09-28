@@ -2,12 +2,14 @@ import abc
 import functools
 from pathlib import Path
 from typing import Callable, List, Mapping, Dict
+import numpy as np
 
 import torch
 import torchaudio
 from tqdm import tqdm
 from diba.diba import Likelihood
 from torch.utils.data import DataLoader
+from diba.diba.diba import _compute_log_posterior
 from diba.diba.interfaces import SeparationPrior
 
 from lass_audio.lass.datasets import SeparationDataset
@@ -20,6 +22,7 @@ from lass_audio.lass.datasets import ChunkedMultipleDataset
 from pgmpy.models import DynamicBayesianNetwork as DBN
 from pgmpy.models import BayesianNetwork
 from pgmpy.inference import VariableElimination
+from pgmpy.factors.discrete import TabularCPD
 
 
 audio_root = Path(__file__).parent.parent
@@ -51,7 +54,6 @@ class SumProductSeparator(Separator):
         self.encode_fn = encode_fn
         # lambda x: decode_latent_codes(vqvae, x.squeeze(0), level=vqvae_level)
         self.decode_fn = decode_fn
-
         self.device = torch.device("cpu")
 
     def _print_graph(self, graph: DBN):
@@ -84,17 +86,18 @@ class SumProductSeparator(Separator):
             # - One graph per tuple of sources, meaning num_batches total graphs, but small. This is good since the mixture only depends on the tuple of sources.
             # - One graph per dataset, meaning 1 single graph but huge. This is good in order to capture patterns.
             # Since the source influece only the mixture, and the priors capture other pieces of information needed, we will choose the first option.
-            print("Batch: ", batch, torch.tensor(batch[0]).shape)
             sources = batch
             weight = 1 / num_sources
 
-            mixture = torch.tensor(
+            print(f"The source has shape: {sources[0].shape}")
+            print(f"The weight is: {weight}")
+
+            self.mixture = torch.tensor(
                 [(source * weight).tolist() for source in sources]).sum(dim=0).squeeze(0)
 
-            time_steps = mixture.shape[-1]
-
-            print(f"The time steps are: {time_steps}")
-            print(f"The mixture shape is: {mixture.shape}")
+            # TODO: this is hard coded, but it corresponds to the max_sample_tokens in the separate, it's also present in the dataset
+            # I think it's done in order to have batches of tokens of audio
+            time_steps = 1024
 
             model = BayesianNetwork()
 
@@ -133,7 +136,7 @@ class SumProductSeparator(Separator):
             prior_0, prior_1 = self.priors
 
             # TODO: in order to compute the logits, you can see how it's done in `diba._ancestral_sample``
-            mixture_codes = self.encode_fn(mixture)
+            mixture_codes = self.encode_fn(self.mixture)
 
             DEBUG_NUM_SOURCES = 2
             # TODO: this is used inside of beam_search and it corresponds to the number of beans to keep, IDK what should be its value in this context
@@ -141,14 +144,20 @@ class SumProductSeparator(Separator):
             xs_0, xs_1 = torch.full((DEBUG_NUM_SOURCES, DEBUG_NUM_CURRENT_BEAMS, time_steps + 1),
                                     fill_value=-1, dtype=torch.long, device=self.device)
 
+            print(
+                f"xs_0 configuration is: num_sources = {DEBUG_NUM_SOURCES}, beams = {DEBUG_NUM_CURRENT_BEAMS}, time_steps={time_steps+1} ")
+
             # NOTE: in this case p.get_sos() returns the value 0
             xs_0[:, 0], xs_1[:, 0] = [p.get_sos() for p in self.priors]
             past_0, past_1 = (None, None)
 
+            # NOTE: Xs_0 is: tensor([[ 0, -1, -1,  ..., -1, -1, -1]]) with shape torch.Size([1, 1025])
+            # NOTE: Xs_1 is: tensor([[ 0, -1, -1,  ..., -1, -1, -1]]) with shape torch.Size([1, 1025])
+            # TODO: this is wrong since in separate xs_0 has shape  (10, 1025)
+
             print(f"Xs_0 is: {xs_0} with shape {xs_0.shape}")
             print(f"Xs_0 is: {xs_1} with shape {xs_1.shape}")
 
-            DEBUG_NUM_CURRENT_BEAMS = 1
             for t in tqdm(range(time_steps), desc="Loop over all the time steps"):
                 # compute log priors
                 log_p_0, past_0 = prior_0._get_logits(
@@ -156,18 +165,37 @@ class SumProductSeparator(Separator):
                 log_p_1, past_1 = prior_1._get_logits(
                     xs_1[:DEBUG_NUM_CURRENT_BEAMS, : t + 1], past_1)
 
-                print("Log_p_0: ", log_p_0, " with shape ", log_p_0.shape)
-                print("Log_p_1: ", log_p_1, " with shape ", log_p_1.shape)
+                prior_probs_0 = torch.softmax(log_p_0, dim=-1)
+                prior_probs_1 = torch.softmax(log_p_1, dim=-1)
+
+                print(
+                    f"Prior probs 0: {prior_probs_0} with shape {prior_probs_0.T.shape}")
+                print(
+                    f"Prior probs 1: {prior_probs_1} with shape {prior_probs_1.T.shape}")
+
+                # TODO: in case t = 0, I just add the prior to the CPD, otherwise I should compute the CPD
+                # using both the prior and the likelihood (?)
+                z_0_t = f"z_0_{t}"
+                z_1_t = f"z_1_{t}"
+
+                DISCRETE_VALUES = 2048
+                model.add_cpds(
+                    TabularCPD(
+                        variable=z_0_t, variable_card=DISCRETE_VALUES, values=prior_probs_0.T.numpy())
+                )
+                model.add_cpds(
+                    TabularCPD(
+                        variable=z_1_t, variable_card=DISCRETE_VALUES, values=prior_probs_1.T.numpy())
+                )
+
+                print(f"The model after computing the priors is: {model}")
 
                 current_mixture_token = mixture_codes[t]
 
                 # Likelihood for the current mixture token in sparse tensor format
-                print("current mixture token: ", current_mixture_token)
-                ll_coords, ll_data = self.likelihood._get_log_likelihood(
-                    current_mixture_token)
-
-                print("Done, ll_coords: ", ll_coords,
-                      " with shape: ", ll_coords.shape)
+                # print("current mixture token: ", current_mixture_token)
+                # ll_coords, ll_data = self.likelihood._get_log_likelihood(
+                #     current_mixture_token)
 
             # print(f"""
             #     Logits 1: {logits_1} with shape {logits_1.shape}
@@ -212,14 +240,14 @@ class SumProductSeparator(Separator):
             # self._print_graph(model)
 
     @torch.no_grad()
-    def separate(self, mixture: torch.Tensor) -> Mapping[str, torch.Tensor]:
+    def separate(self) -> Mapping[str, torch.Tensor]:
 
-        mixture_codes = self.encode_fn(mixture)
+        mixture_codes = self.encode_fn(self.mixture)
 
         print(
             f"Mixture codes are: {mixture_codes} with shape: {torch.tensor(mixture_codes).shape}")
 
-        mixture_len = len(mixture)
+        mixture_len = len(self.mixture)
 
         # Prior = P(z_i)
 
@@ -232,7 +260,7 @@ class SumProductSeparator(Separator):
         CONSIDERED_TOKEN_IDX = 1
         # This is the frequency count tensor of rank K ^ {num_sources + 1} (3 in case of 2 sources).
         ll_coords, ll_data = self.likelihood._get_log_likelihood(
-            x=mixture[0, CONSIDERED_TOKEN_IDX])  # TODO: don't know what this is lol
+            x=self.mixture[0, CONSIDERED_TOKEN_IDX])  # TODO: don't know what this is lol
 
 
 # -----------------------------------------------------------------------------

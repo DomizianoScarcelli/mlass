@@ -224,7 +224,12 @@ def _ancestral_sample(
     log_post_sum = torch.zeros(1, 1, dtype=torch.long, device=device)
     xs_0, xs_1 = torch.full((2, n_samples, sample_tokens + 1),
                             fill_value=-1, dtype=torch.long, device=device)
+
+    # NOTE: shape of xs is torch.Size([10, 1025]), because n_sample = 10 and sample_tokens = 1024
+
+    # NOTE: in this case p.get_sos() returns the value 0
     xs_0[:, 0], xs_1[:, 0] = [p.get_sos() for p in priors]
+
     past_0, past_1 = (None, None)
     num_current_beams = 1
 

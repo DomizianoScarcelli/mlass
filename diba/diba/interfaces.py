@@ -50,7 +50,7 @@ class Likelihood(ABC, DevicePortable):
         _check_dtype(coords, torch.long)
         _check_dtype(data, [torch.float32, torch.float32])
 
-        # TODO: removed for debug
+        # TODO: removed for DEBUG
         # _check_shape(coords, [2, -1])
         # _check_shape(data, [-1])
 
