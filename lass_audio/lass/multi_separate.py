@@ -9,20 +9,16 @@ import torchaudio
 from tqdm import tqdm
 from diba.diba import Likelihood
 from torch.utils.data import DataLoader
-from diba.diba.diba import _compute_log_posterior
+from diba.diba.diba import _ancestral_sample, _compute_log_posterior, _sample
 from diba.diba.interfaces import SeparationPrior
+from diba.diba.utils import get_topk, normalize_logits, unravel_indices
 
 from lass_audio.lass.datasets import SeparationDataset
 from lass_audio.lass.datasets import SeparationSubset
 from lass_audio.lass.diba_interfaces import JukeboxPrior, SparseLikelihood
+from lass_audio.lass.hidden_markov_model import HMM
 from lass_audio.lass.utils import assert_is_audio, decode_latent_codes, get_dataset_subsample, get_raw_to_tokens, setup_priors, setup_vqvae
 from lass_audio.lass.datasets import ChunkedMultipleDataset
-
-
-from pgmpy.models import DynamicBayesianNetwork as DBN
-from pgmpy.models import BayesianNetwork
-from pgmpy.inference import VariableElimination
-from pgmpy.factors.discrete import TabularCPD
 
 
 audio_root = Path(__file__).parent.parent
@@ -43,7 +39,7 @@ class SumProductSeparator(Separator):
         encode_fn: Callable,
         decode_fn: Callable,
         priors: Mapping[str, SeparationPrior],
-        likelihood: Likelihood,
+        likelihood: SparseLikelihood,
     ):
         super().__init__()
         self.likelihood = likelihood
@@ -56,29 +52,21 @@ class SumProductSeparator(Separator):
         self.decode_fn = decode_fn
         self.device = torch.device("cpu")
 
-    def _print_graph(self, graph: DBN):
-        print("Nodes in the graph:")
-        print(graph.nodes())
-
-        print("\nEdges in the graph:")
-        print(graph.edges())
-
-        # Print the conditional probability distributions (CPDs) for each node in the graph
-        for node in graph.nodes():
-            cpd = graph.get_cpds(node)
-            print(f"\nCPD for node '{node}':")
-            print(cpd)
-
     def initialize_graphical_model(self,
                                    dataset: SeparationDataset,
-                                   num_sources: int) -> Dict[int, BayesianNetwork]:
+                                   num_sources: int) -> torch.Tensor:
+        """
+        Given the dataset and the number of sources to separate, it creates the Hidden Markov Model that models the problem.
+
+        The HMM is represented as an adjacency list, where each node is a latent variable and each edge is a dependency between two latent variables.
+        """
 
         # Step 1: Define the Directed Graphical Model
         # model = BayesianNetwork()
 
         loader = DataLoader(dataset, batch_size=1, num_workers=0)
 
-        models: Dict[int, BayesianNetwork] = {}
+        # models: Dict[int, BayesianNetwork] = {}
 
         batch: List[torch.Tensor]
         for batch_idx, batch in enumerate(tqdm(loader)):
@@ -86,11 +74,11 @@ class SumProductSeparator(Separator):
             # - One graph per tuple of sources, meaning num_batches total graphs, but small. This is good since the mixture only depends on the tuple of sources.
             # - One graph per dataset, meaning 1 single graph but huge. This is good in order to capture patterns.
             # Since the source influece only the mixture, and the priors capture other pieces of information needed, we will choose the first option.
+
+            # Step 1: initialize the graphical model with the nodes.
+            # These are used just to create the mixture, and then they correspond to the hidden variables, so they cannot be observed.
             sources = batch
             weight = 1 / num_sources
-
-            print(f"The source has shape: {sources[0].shape}")
-            print(f"The weight is: {weight}")
 
             self.mixture = torch.tensor(
                 [(source * weight).tolist() for source in sources]).sum(dim=0).squeeze(0)
@@ -99,128 +87,94 @@ class SumProductSeparator(Separator):
             # I think it's done in order to have batches of tokens of audio
             time_steps = 1024
 
-            model = BayesianNetwork()
+            hmm = HMM(M=time_steps, N=2048)
 
-            sources_nodes = [f"z_{i}_{t}" for i in range(
-                num_sources) for t in range(time_steps)]
-            mixture_nodes = [f"m_{t}" for t in range(time_steps)]
-
-            model.add_nodes_from(sources_nodes + mixture_nodes)
-
-            # Add edges for t_i_{t-1} -> t_i_{t} (Temporal dependency for the latent sources)
-            for i in range(num_sources):
-                for t in tqdm(range(time_steps), desc=f"Temporal dependency for the latent source z_{i}"):
-                    if t == time_steps - 1:  # Skip the last time step
-                        break
-                    start = f"z_{i}_{t}"
-                    end = f"z_{i}_{t+1}"
-                    mixture_node = f"m_{t}"
-
-                    model.add_edge(start, mixture_node)
-                    model.add_edge(start, end)
-
-            # Add edges for m_{t-1} -> m_{t} (Temporal dependency for the mixture signal)
-            for t in tqdm(range(time_steps), desc="Temporal dependency for the mixture signal"):
-                if t == time_steps - 1:  # Skip the last time step
-                    break
-                start = f"m_{t}"
-                end = f"m_{t+1}"
-
-                model.add_edge(start, end)
-
-            # TODO: verify the correctness of this step
-            # STEP 2: Add CPDs considering priors and likelihood
+            # STEP 2: For each single time step, compute the prior and the likelihood in order to compute the posterior probability.
             # TODO: generalize for more than 2 sources, now this is just for debug reasons
 
             # self.priors is a list of a neural network that expose a _get_logits method
             prior_0, prior_1 = self.priors
 
-            # TODO: in order to compute the logits, you can see how it's done in `diba._ancestral_sample``
+            # I encode the mixture to get its latent code
             mixture_codes = self.encode_fn(self.mixture)
 
             DEBUG_NUM_SOURCES = 2
-            # TODO: this is used inside of beam_search and it corresponds to the number of beans to keep, IDK what should be its value in this context
+            # TODO: this is used inside of beam_search and it corresponds to the number of beans to keep,
+            # IDK what should be its value in this context. For now I will put it to 1, then I'll see if I can generalize it.
             DEBUG_NUM_CURRENT_BEAMS = 1
+
+            # I initialize the latent codes for the two sources.
+            # TODO: I think this whole procedure has to be done inside of the HMM class
             xs_0, xs_1 = torch.full((DEBUG_NUM_SOURCES, DEBUG_NUM_CURRENT_BEAMS, time_steps + 1),
                                     fill_value=-1, dtype=torch.long, device=self.device)
-
-            print(
-                f"xs_0 configuration is: num_sources = {DEBUG_NUM_SOURCES}, beams = {DEBUG_NUM_CURRENT_BEAMS}, time_steps={time_steps+1} ")
 
             # NOTE: in this case p.get_sos() returns the value 0
             xs_0[:, 0], xs_1[:, 0] = [p.get_sos() for p in self.priors]
             past_0, past_1 = (None, None)
 
-            # NOTE: Xs_0 is: tensor([[ 0, -1, -1,  ..., -1, -1, -1]]) with shape torch.Size([1, 1025])
-            # NOTE: Xs_1 is: tensor([[ 0, -1, -1,  ..., -1, -1, -1]]) with shape torch.Size([1, 1025])
-            # TODO: this is wrong since in separate xs_0 has shape  (10, 1025)
+            # NOTE: Xs_0 is: tensor([[ 0, -1, -1,  ..., -1, -1, -1]]) with shape torch.Size([DEBUG_NUM_CURRENT_BEAMS, 1025])
+            # NOTE: Xs_1 is: tensor([[ 0, -1, -1,  ..., -1, -1, -1]]) with shape torch.Size([DEBUG_NUM_CURRENT_BEAMS, 1025])
 
             print(f"Xs_0 is: {xs_0} with shape {xs_0.shape}")
             print(f"Xs_0 is: {xs_1} with shape {xs_1.shape}")
 
+            # TODO: Actually computing the prior and likelihood
             for t in tqdm(range(time_steps), desc="Loop over all the time steps"):
+                CONTENT = xs_0[:DEBUG_NUM_CURRENT_BEAMS, : t + 1]
+                PARSED_CONTENT = CONTENT[:, -1:]
+
+                # TODO: DEBUG: The code breaks because I don't ever update xs_0 and xs_1, which are automatically updated in the beam search because of the auto-regressive nature of the model
+                print(
+                    f"At time step t={t} the content is: {CONTENT} with shape: {CONTENT.shape} \n The parsed content is {PARSED_CONTENT} with shape {PARSED_CONTENT.shape}")
+
                 # compute log priors
                 log_p_0, past_0 = prior_0._get_logits(
                     xs_0[:DEBUG_NUM_CURRENT_BEAMS, : t + 1], past_0)
                 log_p_1, past_1 = prior_1._get_logits(
                     xs_1[:DEBUG_NUM_CURRENT_BEAMS, : t + 1], past_1)
 
-                prior_probs_0 = torch.softmax(log_p_0, dim=-1)
-                prior_probs_1 = torch.softmax(log_p_1, dim=-1)
+                print(f"past_0 is: {past_0}")
+                print(f"past_1 is: {past_1}")
 
-                print(
-                    f"Prior probs 0: {prior_probs_0} with shape {prior_probs_0.T.shape}")
-                print(
-                    f"Prior probs 1: {prior_probs_1} with shape {prior_probs_1.T.shape}")
+                TEMPERATURE = 0.7
 
-                # TODO: in case t = 0, I just add the prior to the CPD, otherwise I should compute the CPD
-                # using both the prior and the likelihood (?)
-                z_0_t = f"z_0_{t}"
-                z_1_t = f"z_1_{t}"
+                # normalize priors and apply temperature
+                log_p_0 = normalize_logits(log_p_0, TEMPERATURE)
+                log_p_1 = normalize_logits(log_p_1, TEMPERATURE)
 
-                DISCRETE_VALUES = 2048
-                model.add_cpds(
-                    TabularCPD(
-                        variable=z_0_t, variable_card=DISCRETE_VALUES, values=prior_probs_0.T.numpy())
-                )
-                model.add_cpds(
-                    TabularCPD(
-                        variable=z_1_t, variable_card=DISCRETE_VALUES, values=prior_probs_1.T.numpy())
-                )
+                # log likelihood in sparse COO format
+                assert isinstance(self.mixture[t], int)
+                ll_coords, ll_data = self.likelihood._get_log_likelihood(
+                    self.mixture[t])
 
-                print(f"The model after computing the priors is: {model}")
+                # compute log posterior
 
-                current_mixture_token = mixture_codes[t]
+                # TODO: make your changes here!
+                if ll_coords.numel() > 0:
+                    # Note: posterior_data has shape (n_samples, nonzeros)
+                    posterior_data = _compute_log_posterior(
+                        ll_data, ll_coords, log_p_0, log_p_1)
 
-                # Likelihood for the current mixture token in sparse tensor format
-                # print("current mixture token: ", current_mixture_token)
-                # ll_coords, ll_data = self.likelihood._get_log_likelihood(
-                #     current_mixture_token)
+                    # TODO: here happens the sampling
+                    log_post_sum, (beams, coords_idx) = get_topk(
+                        log_post_sum + posterior_data, DEBUG_NUM_CURRENT_BEAMS)
 
-            # print(f"""
-            #     Logits 1: {logits_1} with shape {logits_1.shape}
-            #     Logits 2: {logits_2} with shape {logits_2.shape}
-            #       """)
+                    log_post_sum = log_post_sum.unsqueeze(-1)
+                    x_0, x_1 = ll_coords[:, coords_idx]
+                else:
+                    raise RuntimeError(
+                        f"Code {self.mixture[t]} is not available in likelihood!")
 
             # Add the model to the list of models
-            models[batch_idx] = model
+            # models[batch_idx] = model
 
-            print(
-                f"Length of the dataset and number of batches: {len(dataset)}")
+            # print(
+            #     f"Length of the dataset and number of batches: {len(dataset)}")
 
-            print(
-                f"model after step 1 is: {model}")
+            # print(
+            #     f"model after step 1 is: {model}")
 
-            raise RuntimeError("STOP HERE MAN!")
-
-            # TODO:
-            # Step 3: Parameterize the graph with prior and likelihood values
-            # You'll need to define Conditional Probability Distributions (CPDs) for each node in the graph
-            # based on your prior probabilities and likelihood values.
-
-            # Iterate through each latent source and time step
-
-            # (GPT help)[https://chat.openai.com/share/a20bcbfd-5970-449f-b9f4-baa2f97e61a6]
+            # raise RuntimeError("STOP HERE MAN!")
 
             # TODO:
             # Step 4: Perform Inference and Sample each source z_i from P(z_i | m)

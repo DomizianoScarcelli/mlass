@@ -204,11 +204,6 @@ class ConditionalAutoregressive2D(nn.Module):
                 x[:, 0] = self.start_token
         else:
             # assert isinstance(x, t.cuda.LongTensor)
-
-            # TODO: debug, remove
-            print(
-                f"Before error, x is {x}, bins is {self.bins}, sample_t is {sample_t}")
-            raise RuntimeError("DEBUGGER, ALT!")
             assert (0 <= x).all() and (x < self.bins).all()
             x = self.x_emb(x)
         assert x.shape == (n_samples, 1, self.width)

@@ -285,6 +285,27 @@ def _ancestral_sample(
         past_0 = prior_0._reorder_cache(past_0, beams)
         past_1 = prior_1._reorder_cache(past_1, beams)
 
+        # NOTE: Some info about the log post sum and x_0, x_1
+        # Log pos sum at t=45 is: tensor([[-90.5435],
+        # [-89.2126],
+        # [-91.1584],
+        # [-90.6628],
+        # [-92.5919],
+        # [-92.6901],
+        # [-92.9899],
+        # [-93.3323],
+        # [-92.9897],
+        # [-93.2421]]) with shape torch.Size([10, 1])
+
+        # x_0 at t=45 is tensor([255, 255, 255, 255, 255, 255, 255, 255, 255, 255]) with shape torch.Size([10])
+        # x_1 at t=45 is tensor([653, 653, 653, 653, 653, 653, 653, 653, 653, 653]) with shape torch.Size([10])
+
+        print(
+            f"Log pos sum at t={sample_t} is: {log_post_sum} with shape {log_post_sum.shape}")
+
+        print(f"x_0 at t={sample_t} is {x_0} with shape {x_0.shape}")
+        print(f"x_1 at t={sample_t} is {x_1} with shape {x_1.shape}")
+
     result_0, result_1 = xs_0[:num_current_beams,
                               1:], xs_1[:num_current_beams, 1:]
 

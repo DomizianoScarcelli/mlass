@@ -65,7 +65,7 @@ class MockData():
 
         self.separator = SumProductSeparator(
             encode_fn=lambda x: vqvae.encode(
-                x.unsqueeze(-1).to(device), level, level + 1)[-1].squeeze(0).tolist(),  # TODO: check if correct
+                x.unsqueeze(-1).to(device), level, level + 1)[-1].squeeze(0).tolist(),
             decode_fn=lambda x: decode_latent_codes(
                 vqvae, x.squeeze(0), level=level),
             priors={k: JukeboxPrior(p.prior, torch.zeros(
