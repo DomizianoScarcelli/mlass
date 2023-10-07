@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 from diba.diba.diba import _ancestral_sample, _compute_log_posterior, _sample
 from diba.diba.interfaces import SeparationPrior
 from diba.diba.utils import get_topk, normalize_logits, unravel_indices
+from lass_audio.jukebox.vqvae.vqvae import VQVAE
 
 from lass_audio.lass.datasets import SeparationDataset
 from lass_audio.lass.datasets import SeparationSubset
@@ -54,7 +55,8 @@ class SumProductSeparator(Separator):
 
     def initialize_graphical_model(self,
                                    dataset: SeparationDataset,
-                                   num_sources: int) -> torch.Tensor:
+                                   num_sources: int,
+                                   vqvae: VQVAE) -> torch.Tensor:
         """
         Given the dataset and the number of sources to separate, it creates the Hidden Markov Model that models the problem.
 
@@ -83,11 +85,15 @@ class SumProductSeparator(Separator):
             self.mixture = torch.tensor(
                 [(source * weight).tolist() for source in sources]).sum(dim=0).squeeze(0)
 
+            self.mixture_codes = self.encode_fn(self.mixture)
             # TODO: this is hard coded, but it corresponds to the max_sample_tokens in the separate, it's also present in the dataset
             # I think it's done in order to have batches of tokens of audio
             time_steps = 1024
 
-            hmm = HMM(M=time_steps, N=2048)
+            hmm = HMM(M=time_steps, num_sources=2,
+                      vqvae=vqvae, priors=self.priors, likelihood=self.likelihood, mixture_codes=self.mixture_codes)
+
+            raise RuntimeError("Stop here man!")
 
             # STEP 2: For each single time step, compute the prior and the likelihood in order to compute the posterior probability.
             # TODO: generalize for more than 2 sources, now this is just for debug reasons

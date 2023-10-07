@@ -264,7 +264,9 @@ def _ancestral_sample(
             log_post_sum, (beams, coords_idx) = get_topk(
                 log_post_sum + posterior_data, n_samples)
             log_post_sum = log_post_sum.unsqueeze(-1)
+
             x_0, x_1 = ll_coords[:, coords_idx]
+
         else:
             raise RuntimeError(
                 f"Code {mixture[sample_t]} is not available in likelihood!")

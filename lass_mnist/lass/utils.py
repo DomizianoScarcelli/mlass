@@ -4,7 +4,7 @@ from typing import Tuple
 import torch
 from hydra.core.config_store import ConfigStore
 
-from modules import VectorQuantizedVAE
+from ..modules import VectorQuantizedVAE
 
 # useful paths
 ROOT_DIR = Path(__file__).parent.parent
@@ -60,7 +60,8 @@ def refine_latents(
         geni2 = model.decode_latents(gen2)
         geni_mixtures = (geni1 + geni2) / 2.0
 
-        reg = regularizer_coeff * torch.mean((gen1 - latents_1) ** 2 + (gen2 - latents_2) ** 2)
+        reg = regularizer_coeff * \
+            torch.mean((gen1 - latents_1) ** 2 + (gen2 - latents_2) ** 2)
         loss = torch.mean((geni_mixtures - mixtures).pow(2)) + reg
         loss.backward()
 

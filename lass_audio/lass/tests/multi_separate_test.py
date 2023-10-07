@@ -41,7 +41,7 @@ class MockData():
         device = torch.device("cpu")
 
         # setup models
-        vqvae = setup_vqvae(
+        self.vqvae = setup_vqvae(
             vqvae_path=vqvae_path,
             vqvae_type=vqvae_type,
             sample_rate=sample_rate,
@@ -52,7 +52,7 @@ class MockData():
         priors = setup_priors(
             prior_paths=[prior_1_path, prior_2_path],
             prior_types=[prior_1_type, prior_2_type],
-            vqvae=vqvae,
+            vqvae=self.vqvae,
             fp16=True,
             device=device,
         )
@@ -61,19 +61,20 @@ class MockData():
             Path(prior_2_path).stem: priors[1],
         }
 
-        level = vqvae.levels - 1
+        level = self.vqvae.levels - 1
 
         self.separator = SumProductSeparator(
-            encode_fn=lambda x: vqvae.encode(
+            encode_fn=lambda x: self.vqvae.encode(
                 x.unsqueeze(-1).to(device), level, level + 1)[-1].squeeze(0).tolist(),
             decode_fn=lambda x: decode_latent_codes(
-                vqvae, x.squeeze(0), level=level),
+                self.vqvae, x.squeeze(0), level=level),
             priors={k: JukeboxPrior(p.prior, torch.zeros(
                 (), dtype=torch.float32, device=device)) for k, p in priors.items()},
             likelihood=SparseLikelihood(sum_frequencies_path, device, 3.0),
         )
 
-        raw_to_tokens = get_raw_to_tokens(vqvae.strides_t, vqvae.downs_t)
+        raw_to_tokens = get_raw_to_tokens(
+            self.vqvae.strides_t, self.vqvae.downs_t)
 
         self.dataset = ChunkedMultipleDataset(
             instruments_audio_dir=AUDIO_DIRS,
@@ -89,7 +90,8 @@ class MultiSeparateTest(unittest.TestCase):
 
         separator.initialize_graphical_model(
             dataset=data.dataset,
-            num_sources=data.NUM_SOURCES)
+            num_sources=data.NUM_SOURCES,
+            vqvae=data.vqvae)
 
         separator.separate()
 

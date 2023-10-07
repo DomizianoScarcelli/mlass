@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from vector_quantizer import vq, vq_st
+from .vector_quantizer import vq, vq_st
 
 
 # function
@@ -109,14 +109,16 @@ class VectorQuantizedVAE(nn.Module):
         return codes
 
     def decode(self, codes):
-        z_q_x = self.codeBook.embedding(codes).permute(0, 3, 1, 2)  # (B, C, H, W)
+        z_q_x = self.codeBook.embedding(
+            codes).permute(0, 3, 1, 2)  # (B, C, H, W)
         x_tilde = self.decoder(z_q_x)
         return x_tilde
-        
-    def codes_to_latents(self,codes):
-        return self.codeBook.embedding(codes).permute(0, 3, 1, 2)  # (B, C, H, W)
-    
-    def decode_latents(self, z_q_x):        
+
+    def codes_to_latents(self, codes):
+        # (B, C, H, W)
+        return self.codeBook.embedding(codes).permute(0, 3, 1, 2)
+
+    def decode_latents(self, z_q_x):
         x_tilde = self.decoder(z_q_x)
         return x_tilde
 
@@ -125,6 +127,3 @@ class VectorQuantizedVAE(nn.Module):
         z_q_x_st, z_q_x = self.codeBook.straight_through(z_e_x)
         x_tilde = self.decoder(z_q_x_st)
         return x_tilde, z_e_x, z_q_x
-
-
-

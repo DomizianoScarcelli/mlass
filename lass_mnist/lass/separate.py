@@ -10,9 +10,9 @@ from transformers import GPT2LMHeadModel, PreTrainedModel
 from torchvision.utils import save_image
 import numpy as np
 import random
-from modules import VectorQuantizedVAE
-from lass.utils import refine_latents, CONFIG_DIR, ROOT_DIR, CONFIG_STORE
-from lass.diba_interaces import UnconditionedTransformerPrior, DenseLikelihood
+from ..modules import VectorQuantizedVAE
+from .utils import refine_latents, CONFIG_DIR, ROOT_DIR, CONFIG_STORE
+from .diba_interaces import UnconditionedTransformerPrior, DenseLikelihood
 import multiprocessing as mp
 from typing import Sequence
 from numpy.random import default_rng
@@ -111,7 +111,7 @@ def generate_samples(
 
     gen1ims, gen2ims = [], []
     gen1lats, gen2lats = [], []
-    for bi in range(batch_size):
+    for bi in tqdm.tqdm(range(batch_size), desc="separating"):
         r0, r1 = separation_method(
             priors=[p0, p1],
             likelihood=likelihood,
@@ -174,7 +174,8 @@ class EvaluateSeparationConfig:
     num_workers: int = mp.cpu_count() - 1
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
-    checkpoints: CheckpointsConfig = CheckpointsConfig()
+    checkpoints: CheckpointsConfig = field(default_factory=CheckpointsConfig)
+
     # method: SeparationMethodConfig = SeparationMethodConfig()
 
 
@@ -210,6 +211,8 @@ def main(cfg):
         worker_init_fn=seed_worker,
     )
 
+    print("Loaded test loader")
+
     # load models
     with open(cfg.checkpoints.vqvae, 'rb') as f:
         model.load_state_dict(torch.load(f, map_location=cfg.device))
@@ -225,6 +228,8 @@ def main(cfg):
     transformer.eval()
 
     uncond_bos = 0
+
+    print("Start separation")
 
     # main separation loop
     for i, batch in enumerate(tqdm.tqdm(test_loader)):
