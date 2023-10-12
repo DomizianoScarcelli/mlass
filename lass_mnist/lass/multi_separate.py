@@ -1,6 +1,13 @@
+"""
+This will contain the code in order to perform the separation with more than 2 sources.
+
+NOTE: for now, since I don't want to modify the dataset loader to have multiple sources, I will use only 2 sources, but use the graphical model
+to separate.
+"""
 from dataclasses import dataclass, field
 from typing import Tuple, List, Any, Optional, Mapping, Callable
 
+import shutil
 import hydra
 import torch
 import torchmetrics
@@ -10,6 +17,7 @@ from transformers import GPT2LMHeadModel, PreTrainedModel
 from torchvision.utils import save_image
 import numpy as np
 import random
+
 from ..modules import VectorQuantizedVAE
 from .utils import refine_latents, CONFIG_DIR, ROOT_DIR, CONFIG_STORE
 from .diba_interaces import UnconditionedTransformerPrior, DenseLikelihood
@@ -17,6 +25,8 @@ import multiprocessing as mp
 from typing import Sequence
 from numpy.random import default_rng
 from torch.utils.data import Dataset
+
+from .belief_propagation import graphical_model_separation
 
 
 class PairsDataset(Dataset):
@@ -107,17 +117,17 @@ def generate_samples(
     label0, label1 = bos
     p0 = UnconditionedTransformerPrior(transformer=transformer, sos=label0)
     p1 = UnconditionedTransformerPrior(transformer=transformer, sos=label1)
-
     likelihood = DenseLikelihood(sums=sums)
 
     gen1ims, gen2ims = [], []
     gen1lats, gen2lats = [], []
     for bi in tqdm.tqdm(range(batch_size), desc="separating"):
-        print(f"I'm using the separation method: {separation_method}")
-        r0, r1 = separation_method(
+        r0, r1 = graphical_model_separation(
             priors=[p0, p1],
             likelihood=likelihood,
             mixture=codes_mixture[bi],
+            latent_length=2048,  # TODO:, I don't know
+            num_sources=2
         )
 
         # get separation closer to mixture
@@ -196,7 +206,10 @@ def main(cfg):
     assert isinstance(transformer, PreTrainedModel)
 
     # create output directory
-    result_dir = ROOT_DIR / "separated-images"
+    result_dir = ROOT_DIR / "multi-separated-images"
+    if result_dir.exists():
+        shutil.rmtree(result_dir)
+
     result_dir.mkdir(parents=True)
     (result_dir / "sep").mkdir()
     (result_dir / "ori").mkdir()
@@ -251,6 +264,7 @@ def main(cfg):
             gts=[gt1, gt2],
             bos=[labels1, labels2],
             latent_length=cfg.latent_length,
+            # in this case cfg.separation_metho is diba.diba.fast_sampled_separation
             separation_method=hydra.utils.instantiate(cfg.separation_method)
         )
 
