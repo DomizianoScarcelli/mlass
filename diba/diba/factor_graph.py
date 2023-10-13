@@ -11,13 +11,21 @@ class Variable:
         self.classIdx = classIdx
         self.idx = idx
         self.mixture = mixture
+        self.neigh_factors: List[Factor] = []
 
 
 class Factor:
-    def __init__(self, factor_type: str, idx: int, connected_vars: List[Variable], value: torch.Tensor):
-        self.factor_type = factor_type
+    def __init__(self, type: str, idx: int, connected_vars: List[Variable], value: torch.Tensor):
+        self.type = type
         self.idx = idx
         self.connected_vars = connected_vars
+        self.value = value
+
+
+class Message:
+    def __init__(self, factor: Factor, variable: Variable, value: torch.Tensor):
+        self.factor = factor
+        self.variable = variable
         self.value = value
 
 
@@ -51,12 +59,12 @@ class FactorGraph:
         self.priors = [UnconditionedTransformerPrior(
             transformer=self.transformer, sos=0) for _ in range(self.num_classes)]
 
-        # list of dictionaries, each dictionary is a factor
-        self.factors: List = []
-
         ##########################
         # Initialize the factors #
         ##########################
+
+        # list of dictionaries, each dictionary is a factor
+        self.factors: List[Factor] = []
 
         # add the marginal distribution of the mixture
         # p(m_1), p(m_2), ..., p(m_n)
@@ -73,7 +81,7 @@ class FactorGraph:
         # p(z^j_1), p(z^j_2), ..., p(z^j_n)
         for j in range(self.num_classes):
             for i in range(self.mixture_length):
-                factor = Factor("source_marginal",
+                factor = Factor(type="source_marginal",
                                 idx=i,
                                 connected_vars=[
                                     Variable(classIdx=j, idx=i),
@@ -86,7 +94,7 @@ class FactorGraph:
             for i in range(self.mixture_length):
                 # the first prior is null
                 if i > 0:
-                    factor = Factor("prior",
+                    factor = Factor(type="prior",
                                     idx=i,
                                     connected_vars=[Variable(classIdx=j, idx=i),
                                                     Variable(classIdx=j, idx=i-1)],
@@ -97,7 +105,7 @@ class FactorGraph:
         # p(z^j_i | m_i)
         for j in range(self.num_classes):
             for i in range(self.mixture_length):
-                factor = Factor("posterior",
+                factor = Factor(type="posterior",
                                 idx=i,
                                 connected_vars=[
                                     Variable(classIdx=j, idx=i),
@@ -107,7 +115,7 @@ class FactorGraph:
 
         # add the likelihood factors, which don't depend on the indices
         # p(m| z^1, z^2, ..., z^k)
-        likelihood_factor = Factor("likelihood",
+        likelihood_factor = Factor(type="likelihood",
                                    idx=0,
                                    connected_vars=[
                                        Variable(classIdx=None,
@@ -120,33 +128,18 @@ class FactorGraph:
         # Initialize the messages #
         ###########################
 
-        self.msg_fv = {}  # factor->variables messages (dictionary)
-        self.msg_vf = {}  # variables->factor messages (dictionary)
-        # neighboring factors of variables (list of list)
-        self.ne_var = [[] for i in range(self.mixture_length)]
+        # factor->variables messages list
+        self.msg_fv: List[Message] = []
+        # variables->factor messages list
+        self.msg_vf: List[Message] = []
 
-        for index, factor in enumerate(self.factors):
-            factor_type = factor['type']
-            variable = factor['var']
-
-            # marginal factors (unary)
-            if factor_type == 'source_marginal' or factor_type == "mixture_marginal":
-                # I just connect the factor to the variable
-                factor_to = (index, variable)
-                self.msg_fv[factor_to] = torch.zeros(
-                    (1, self.num_latent_codes))
-            # prior factors (binary)
-            elif factor_type == "prior":
-                # i first connect the variable to the factor
-                # (z^j_i, f_i)
-                from_variable = (variable, index)
-                # then i connect the factor to the other variable in the factor
-                # (f_i, z^j_{i-1}, )
-                to_factor = (index, variable)
-                pass
-            # likelihood factor (n-ary)
-            elif factor_type == "likelihood":
-                pass
+        for factor in self.factors:
+            for var in factor.connected_vars:
+                message = Message(
+                    factor=factor, variable=var, value=factor.value)
+                self.msg_fv.append(message)
+                self.msg_vf.append(message)
+                var.neigh_factors.append(factor)
 
     def belief_propagation(self):
         """
