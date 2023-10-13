@@ -17,7 +17,7 @@ from lass_audio.jukebox.vqvae.vqvae import VQVAE
 from lass_audio.lass.datasets import SeparationDataset
 from lass_audio.lass.datasets import SeparationSubset
 from lass_audio.lass.diba_interfaces import JukeboxPrior, SparseLikelihood
-from lass_audio.lass.hidden_markov_model import HMM
+from diba.diba.factor_graph import FactorGraph
 from lass_audio.lass.utils import assert_is_audio, decode_latent_codes, get_dataset_subsample, get_raw_to_tokens, setup_priors, setup_vqvae
 from lass_audio.lass.datasets import ChunkedMultipleDataset
 
@@ -90,8 +90,8 @@ class SumProductSeparator(Separator):
             # I think it's done in order to have batches of tokens of audio
             time_steps = 1024
 
-            hmm = HMM(M=time_steps, num_sources=2,
-                      vqvae=vqvae, priors=self.priors, likelihood=self.likelihood, mixture_codes=self.mixture_codes)
+            factor_graph = FactorGraph(
+                num_classes=2, mixture=self.mixture_codes)
 
             raise RuntimeError("Stop here man!")
 
