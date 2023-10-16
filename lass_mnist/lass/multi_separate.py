@@ -203,6 +203,7 @@ def main(cfg):
     # instantiate models
     model = hydra.utils.instantiate(cfg.vqvae).to(cfg.device)
     transformer = hydra.utils.instantiate(cfg.autoregressive).to(cfg.device)
+
     assert isinstance(transformer, PreTrainedModel)
 
     # create output directory

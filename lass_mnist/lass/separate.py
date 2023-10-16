@@ -113,7 +113,7 @@ def generate_samples(
     gen1ims, gen2ims = [], []
     gen1lats, gen2lats = [], []
     for bi in tqdm.tqdm(range(batch_size), desc="separating"):
-        print(f"I'm using the separation method: {separation_method}")
+        # print(f"I'm using the separation method: {separation_method}")
         r0, r1 = separation_method(
             priors=[p0, p1],
             likelihood=likelihood,
@@ -194,6 +194,10 @@ def main(cfg):
     model = hydra.utils.instantiate(cfg.vqvae).to(cfg.device)
     transformer = hydra.utils.instantiate(cfg.autoregressive).to(cfg.device)
     assert isinstance(transformer, PreTrainedModel)
+
+    print(f"-------------")
+    print(f"Transformer: {transformer}")
+    print(f"-------------")
 
     # create output directory
     result_dir = ROOT_DIR / "separated-images"

@@ -1,5 +1,4 @@
 import time
-from pathlib import Path
 from typing import Dict, List, Set, Union
 import torch
 from tqdm import tqdm
@@ -7,6 +6,26 @@ from tqdm import tqdm
 from lass_mnist.lass.diba_interaces import UnconditionedTransformerPrior
 from transformers import GPT2LMHeadModel, GPT2Config
 from torch.nn.functional import pad
+
+"""
+### Sum-product algorithm
+**Inputs:**
+* `num_vars`, `num_states`, `factors`, `msg_fv`, `msg_vf`, `ne_var`
+
+**Outputs:**
+* `marginals`: `num_vars` x `num_states` array of estimated max-marginals
+* `est`: array comprising the estimated state of each variable
+
+Note: $\chi_f$ are the variables that are involved for the factor $f$
+
+**Algorithm Pseudocode:**
+* For `N` iterations do:
+ * Update all unary factor-to-variable messages: $\lambda_{f\rightarrow x}(x) = f(x)$
+ * Update all pairwise factor-to-variable messages: $$\lambda_{f \rightarrow x}(x)=\log \left(\sum_{\mathcal{X}_f \backslash x} f\left(\mathcal{X}_f\right) \exp \left[\sum_{y \in\{n e(f) \backslash x\}} \lambda_{y \rightarrow f}(y)\right]\right)$$
+ * Update all variable-to-factor messages: $\lambda_{x\rightarrow f}(x) = \sum_{g\in\{ ne(x)\setminus f\}}\lambda_{g\rightarrow x}(x)$
+            
+* Calculate Marginals: $\gamma_x(x) = \sum_{g\in\{ ne(x)\}}\lambda_{g\rightarrow x}(x)$
+"""
 
 
 def timeit(func):
@@ -25,6 +44,10 @@ DEBUG = False
 def dprint(*args, **kwargs):
     if DEBUG:
         print(*args, **kwargs)
+
+
+def _check_if_nan(tensor: torch.Tensor) -> bool:
+    return torch.isnan(tensor).any() or torch.isinf(tensor).any()
 
 
 class Variable:
@@ -103,6 +126,9 @@ class FactorGraph:
         self.mixture_length = len(mixture)  # 'n' in the equations
         self.num_latent_codes = 256  # 256 in the case of MNIST
         self.variables: Set[Variable] = set()
+        self.pasts = [None for _ in range(self.num_sources)]
+
+        print(f"Length of the mixture is: {self.mixture_length}")
 
         # initialize the transformer
         transformer_config = GPT2Config(
@@ -203,11 +229,6 @@ class FactorGraph:
         # Initialize the messages #
         ###########################
 
-        # factor->variables messages list
-        self.msg_fv: Set[Message] = set()
-        # variables->factor messages list
-        self.msg_vf: Set[Message] = set()
-
         for factor in self.factors:
 
             for var in factor.connected_vars:
@@ -227,9 +248,6 @@ class FactorGraph:
                         f.incoming_messages.add(message_out)
                         f.outgoing_messages.add(message_in)
 
-                self.msg_fv.add(message_in)
-                self.msg_vf.add(message_out)
-
         # Trick for the variables
         for factor in self.factors:
             factor.connected_vars = [
@@ -242,20 +260,13 @@ class FactorGraph:
             variables={self.variables},
             mixture_length={self.mixture_length}, 
             num_latent_codes={self.num_latent_codes},
-            factors={self.factors},
-            msg_fv={self.msg_fv}, 
-            msg_vf={self.msg_vf})"""
+            factors={self.factors}"""
 
-    def element_wise_prod_excluding_row(self, tensor1: torch.Tensor, tensor2: torch.Tensor, row: int) -> torch.Tensor:
+    def _element_wise_prod_excluding_row(self, tensor1: torch.Tensor, tensor2: torch.Tensor, row: int) -> torch.Tensor:
         """
         Element-wise product of two tensors, excluding the given row
         """
-        # Specify the row to exclude (let's say the first row, which is index 0)
-
-        # Multiply the tensors element-wise
         result = tensor1 * tensor2
-
-        # Remove the specified row using slicing
         result = torch.cat(
             (result[:row], result[row+1:]), dim=0)
         return result
@@ -294,7 +305,8 @@ class FactorGraph:
         """
         Run the sum-product algorithm for the given number of iterations in order to compute the marginal distributions.
         """
-        for _ in tqdm(range(iterations), desc="Belief Propagation"):
+
+        for it in tqdm(range(iterations), desc="Belief Propagation"):
             # Update all unary factor-to-variable messages
             for variable in self.variables:
                 for incoming_message in variable.incoming_messages:
@@ -306,19 +318,65 @@ class FactorGraph:
             non_unary_factors = [
                 fac for fac in self.factors if not (fac.type == "mixture_marginal" or fac.type == "source_marginal")]
             for factor in tqdm(non_unary_factors, desc="Factor-to-Variable messages"):
+                if factor.type == "prior":
+                    for fac_var in factor.connected_vars:
+                        # NOTE: in the case of uncoditional priors, the past is always None
+                        class_prior: UnconditionedTransformerPrior = self.priors[fac_var.classIdx]
+
+                        past = self.pasts[fac_var.classIdx]
+
+                        dprint(f"Factor value idx is: {fac_var.idx}")
+                        dprint(
+                            f"Mixture is {self.mixture} with shape: {self.mixture.shape}")
+                        observed_mixture = self.mixture[fac_var.idx].unsqueeze(
+                            0).unsqueeze(0).to(torch.long)
+
+                        dprint(
+                            f"Obseved mixture shape is: {observed_mixture.shape}")
+
+                        log_priors, new_past = class_prior.get_logits(
+                            token_ids=observed_mixture,
+                            past_key_values=past)
+
+                        # TODO: there is a problem here, since new past is always None
+                        if new_past is not None:
+                            dprint(f"Past is: {past}")
+                            dprint(f"New past is: {new_past}")
+                            raise Exception("Stop here")
+
+                        self.pasts[fac_var.classIdx] = new_past
+
+                        prob_priors = torch.softmax(log_priors, dim=-1)
+
+                        updated_factor_value = prob_priors.squeeze(0)
+
+                        assert not _check_if_nan(
+                            updated_factor_value), f"The updated factor value for {factor} value is nan during autoregressive prior computation"
+
+                        factor.value[:,
+                                     fac_var.classIdx] = updated_factor_value
+
                 for outgoing_message in factor.outgoing_messages:
                     dprint(f"-------------------")
-                    variable: Variable = outgoing_message._to
+                    # TODO: strange trick, I should find a better way to do this
+                    temp_var: Variable = outgoing_message._to
+                    variable = [
+                        var for var in self.variables if var == temp_var][0]
                     dprint(f"Factor: {factor}")
+                    dprint(f"Temp var: {temp_var}")
                     dprint(f"Variable: {variable}")
-                    # TODO: try to avoid this for loop
+
+                    assert variable in factor.connected_vars, f"""
+                        The variable {variable} is not connected to the factor {factor}.
+                        The connected variables are: {factor.connected_vars}
+                    """
+
                     neigh_variables = factor.connected_vars
 
                     dprint(
                         f"Neigh variables to factor {factor}: {neigh_variables}")
 
-                    variable_idx_in_factor: int = factor.connected_vars.index(
-                        variable)
+                    variable_idx_in_factor = neigh_variables.index(variable)
 
                     messages_from_var_to_factor = torch.stack([
                         message.value for variable in neigh_variables for message in variable.outgoing_messages if message._to == factor], dim=0)
@@ -327,37 +385,75 @@ class FactorGraph:
                         messages_from_var_to_factor, dim=0)
 
                     updated_message = torch.log(
-                        torch.sum(self.element_wise_prod_excluding_row(factor.value.T, torch.exp(messages_from_var_to_factor_sum), variable_idx_in_factor), dim=0))
+                        torch.sum(self._element_wise_prod_excluding_row(factor.value.T, torch.exp(messages_from_var_to_factor_sum), variable_idx_in_factor), dim=0) + 1e-10)
 
                     dprint(
                         f"Updates message shape: {updated_message.shape}")
 
+                    assert not _check_if_nan(
+                        updated_message), f"""
+                        The updated message for {outgoing_message} is nan during factor-to-variable message computation.
+
+                        For debug: 
+                        factor.value: {factor.value}
+                        messages_from_var_to_factor_sum: {messages_from_var_to_factor_sum}
+                        exp: {torch.exp(messages_from_var_to_factor_sum)}
+                        simple_prod: {factor.value.T * torch.exp(messages_from_var_to_factor_sum)}
+                        element_wise_prod_excluding_row: {self._element_wise_prod_excluding_row(factor.value.T, torch.exp(messages_from_var_to_factor_sum), variable_idx_in_factor)}
+                        sum: {torch.sum(self._element_wise_prod_excluding_row(factor.value.T, torch.exp(messages_from_var_to_factor_sum), variable_idx_in_factor), dim=0)}
+                        updated_message (log): {updated_message}
+                        """
+
+                    outgoing_message.value = updated_message
+
+                    _var_message_from_factor = [
+                        message for message in variable.incoming_messages if message._from == factor]
+
+                    # TODO: solve this problem
+                    assert len(_var_message_from_factor) != 0, f"""
+                        There is no message from {factor} to {variable}.
+                        Even though {outgoing_message} exists
+                    """
+
+                    assert (_var_message_from_factor[0].value == updated_message).all(), f"""
+                    The updated message for {outgoing_message} is not the same as the incoming message for {variable} from {factor}.
+                    """
+
             # Update all variable-to-factor messages
             for variable in self.variables:
                 for outgoing_message in variable.outgoing_messages:
-                    factor: Factor = outgoing_message._to
+                    temp_factor: Factor = outgoing_message._to
+                    factor = [fac for fac in self.factors if fac == temp_factor]
 
                     incoming_messages = torch.stack(
                         [message.value for message in variable.incoming_messages if message._from != factor], dim=0)
 
                     incoming_messages_sum = torch.sum(incoming_messages, dim=0)
+
+                    assert not _check_if_nan(
+                        incoming_messages_sum), f"The updated message for {outgoing_message} is nan during variable-to-factor message computation"
+
                     outgoing_message.value = incoming_messages_sum
 
-        # Calculate Marginals
-        for variable in self.variables:
-            variable.marginal = torch.sum(
-                [message.value for message in variable.incoming_messages], dim=0)
+            # Calculate Marginals for each iteration
+            for variable in self.variables:
+                variable.marginal = torch.sum(
+                    torch.stack([message.value for message in variable.incoming_messages]), dim=0)
 
+            print(
+                f"""Marginals for a chosen variable z_0_1 after iteration {it} are: {
+                    [variable for variable in self.variables if variable.classIdx == 0 and variable.idx == 1][0].marginal
+                }""")
         return
 
 
 if __name__ == "__main__":
-    factor_graph = FactorGraph(num_sources=2, mixture=torch.randn((256)))
-    factor_graph.belief_propagation()
+    # MIXTURE_LENGTH = 49
+    mixture = torch.tensor([210, 135, 8, 202, 135, 8, 56, 39, 63, 168, 149, 119, 70, 56, 137, 149, 93, 217, 217, 217, 8, 210, 66,
+                            254, 26, 9, 168, 135, 210, 29, 26, 88, 222, 75, 210, 56, 56, 88, 4, 34, 80, 8, 56, 137, 75, 7, 41, 8, 56])
+    factor_graph = FactorGraph(
+        num_sources=2, mixture=mixture)
+    factor_graph.belief_propagation(iterations=100)
     marginals: Dict[Variable, torch.Tensor] = {
-        var: var.marginal for var in factor_graph.variables}
+        var: torch.softmax(var.marginal, dim=-1) for var in factor_graph.variables}
     print(marginals)
-    # logits_0, past = factor_graph.priors[0].get_logits(
-    #     token_ids=torch.ones((256, 1), dtype=torch.long), past_key_values=None)
-
-    # dprint(factor_graph.msg_fv)

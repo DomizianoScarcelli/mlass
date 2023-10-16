@@ -29,6 +29,9 @@ class UnconditionedTransformerPrior(SeparationPrior):
                               1:] if past_key_values is not None else token_ids
         output = self.transformer(token_ids, past_key_values=past_key_values)
         logits, past = output.logits, output.past_key_values
+        if past is not None:
+            print(f"GPT2 output is {output}")
+            raise Exception("STOPPP")
         return logits[:, -1, :], past
 
     def reorder_cache(self, past_key_values: Any, beam_idx) -> Any:
