@@ -2,6 +2,7 @@ import time
 from typing import Dict, List, Set, Union
 import torch
 from tqdm import tqdm
+from lass_audio.lass.diba_interfaces import SparseLikelihood
 
 from lass_mnist.lass.diba_interaces import UnconditionedTransformerPrior
 from transformers import GPT2LMHeadModel, GPT2Config
@@ -51,6 +52,8 @@ def _check_if_nan(tensor: torch.Tensor) -> bool:
 
 
 class Variable:
+    _variables = {}
+
     def __init__(self, classIdx: Union[int, None], idx: int, mixture: bool = False):
         self.classIdx = classIdx
         self.idx = idx
@@ -59,6 +62,16 @@ class Variable:
         self.outgoing_messages: Set[Message] = set()
         self.incoming_messages: Set[Message] = set()
         self.marginal: torch.Tensor = None
+
+        # Check if an instance with the same characteristics already exists
+        key = (classIdx, idx, mixture)
+        if key in Variable._variables:
+            existing_variable = Variable._variables[key]
+            print(f"Variable {self} already exists")
+            self = existing_variable
+        else:
+            print(f"Variable {self} created for the first time")
+            Variable._variables[key] = self
 
     def __eq__(self, __value: object) -> bool:
         if isinstance(__value, Variable):
@@ -75,10 +88,19 @@ class Variable:
 
 
 class Factor:
+    _connected_vars_instances = {}
+    _factors = {}
+
     def __init__(self, type: str, idx: int, connected_vars: List[Variable], value: torch.Tensor):
         self.type = type
         self.idx = idx
-        self.connected_vars = connected_vars
+        if tuple(connected_vars) in Factor._connected_vars_instances:
+            self.connected_vars = Factor._connected_vars_instances[tuple(
+                connected_vars)]
+        else:
+            self.connected_vars = connected_vars
+            Factor._connected_vars_instances[tuple(
+                connected_vars)] = connected_vars
         self.value = value
         self.incoming_messages: Set[Message] = set()
         self.outgoing_messages: Set[Message] = set()
@@ -96,9 +118,21 @@ class Factor:
 
 
 class Message:
+    _to_instances = {}
+    _from_instances = {}
+
     def __init__(self, _from: Union[Factor, Variable], _to: Union[Factor, Variable], value: torch.Tensor):
-        self._from = _from
-        self._to = _to
+        if _to in Message._to_instances:
+            self._to = Message._to_instances[_to]
+        else:
+            Message._to_instances[_to] = _to
+            self._to = _to
+
+        if _from in Message._from_instances:
+            self._from = Message._from_instances[_from]
+        else:
+            Message._from_instances[_from] = _from
+            self._from = _from
         self.value = value
 
     def __eq__(self, __value: object) -> bool:
@@ -115,7 +149,7 @@ class Message:
 
 class FactorGraph:
     @timeit
-    def __init__(self, num_sources: int, mixture: torch.Tensor) -> None:
+    def __init__(self, num_sources: int, mixture: torch.Tensor, likelihood: SparseLikelihood) -> None:
         """
         Initialize the factor graph
         @params num_classes: number of sources to separate 
@@ -126,6 +160,7 @@ class FactorGraph:
         self.mixture_length = len(mixture)  # 'n' in the equations
         self.num_latent_codes = 256  # 256 in the case of MNIST
         self.variables: Set[Variable] = set()
+        # always None in the case of uncoditional priors
         self.pasts = [None for _ in range(self.num_sources)]
 
         print(f"Length of the mixture is: {self.mixture_length}")
@@ -191,7 +226,9 @@ class FactorGraph:
                                     idx=i,
                                     connected_vars=[Variable(classIdx=j, idx=i),
                                                     Variable(classIdx=j, idx=i-1)],
-                                    value=torch.full(size=(self.num_latent_codes, 2), fill_value=1/self.num_latent_codes))
+                                    # value=torch.full(size=(self.num_latent_codes, 2), fill_value=1/self.num_latent_codes))
+                                    value=torch.zeros((self.num_latent_codes, 2)))
+
                 self.factors.append(factor)
                 self.variables = self.variables.union(
                     set(factor.connected_vars))
@@ -224,6 +261,12 @@ class FactorGraph:
         self.factors.append(likelihood_factor)
         self.variables = self.variables.union(
             set(likelihood_factor.connected_vars))
+
+        assert self.variables == set(Variable._variables.values()), f"""
+            The variables in the factor graph are not the same as the ones in the Variable class.
+            The variables in the factor graph are: {self.variables}
+            The variables in the Variable class are: {Variable._variables.values()}
+        """
 
         ###########################
         # Initialize the messages #
@@ -338,7 +381,6 @@ class FactorGraph:
                             token_ids=observed_mixture,
                             past_key_values=past)
 
-                        # TODO: there is a problem here, since new past is always None
                         if new_past is not None:
                             dprint(f"Past is: {past}")
                             dprint(f"New past is: {new_past}")
@@ -356,14 +398,17 @@ class FactorGraph:
                         factor.value[:,
                                      fac_var.classIdx] = updated_factor_value
 
+                if factor.type == "likelihood":
+                    # TODO: compute the likelihood
+                    continue
+                if factor.type == "posterior":
+                    # compute the posterior
+                    continue
+
                 for outgoing_message in factor.outgoing_messages:
                     dprint(f"-------------------")
-                    # TODO: strange trick, I should find a better way to do this
-                    temp_var: Variable = outgoing_message._to
-                    variable = [
-                        var for var in self.variables if var == temp_var][0]
+                    variable: Variable = outgoing_message._to
                     dprint(f"Factor: {factor}")
-                    dprint(f"Temp var: {temp_var}")
                     dprint(f"Variable: {variable}")
 
                     assert variable in factor.connected_vars, f"""
@@ -371,15 +416,14 @@ class FactorGraph:
                         The connected variables are: {factor.connected_vars}
                     """
 
-                    neigh_variables = factor.connected_vars
-
                     dprint(
-                        f"Neigh variables to factor {factor}: {neigh_variables}")
+                        f"Neigh variables to factor {factor}: {factor.connected_vars}")
 
-                    variable_idx_in_factor = neigh_variables.index(variable)
+                    variable_idx_in_factor = factor.connected_vars.index(
+                        variable)
 
                     messages_from_var_to_factor = torch.stack([
-                        message.value for variable in neigh_variables for message in variable.outgoing_messages if message._to == factor], dim=0)
+                        message.value for variable in factor.connected_vars for message in variable.outgoing_messages if message._to == factor], dim=0)
 
                     messages_from_var_to_factor_sum = torch.sum(
                         messages_from_var_to_factor, dim=0)
@@ -409,12 +453,6 @@ class FactorGraph:
                     _var_message_from_factor = [
                         message for message in variable.incoming_messages if message._from == factor]
 
-                    # TODO: solve this problem
-                    assert len(_var_message_from_factor) != 0, f"""
-                        There is no message from {factor} to {variable}.
-                        Even though {outgoing_message} exists
-                    """
-
                     assert (_var_message_from_factor[0].value == updated_message).all(), f"""
                     The updated message for {outgoing_message} is not the same as the incoming message for {variable} from {factor}.
                     """
@@ -441,8 +479,8 @@ class FactorGraph:
                     torch.stack([message.value for message in variable.incoming_messages]), dim=0)
 
             print(
-                f"""Marginals for a chosen variable z_0_1 after iteration {it} are: {
-                    [variable for variable in self.variables if variable.classIdx == 0 and variable.idx == 1][0].marginal
+                f"""Marginals for a chosen variable z_1_1 after iteration {it} are: {
+                    [variable for variable in self.variables if variable.classIdx == 1 and variable.idx == 1][0].marginal
                 }""")
         return
 
