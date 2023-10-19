@@ -11,6 +11,8 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from diba.diba.interfaces import Likelihood, SeparationPrior
 from diba.diba.utils import get_topk, normalize_logits
 
+# from transformers.generation import GreedySearchDecoderOnlyOutput
+
 # def _print_beams(xs_0, xs_1, scores, posterior_data, ll_coords):
 #
 #     def _print_next_tokens(bi, xs, pi):
@@ -192,6 +194,7 @@ def separate(
     result = result.sequences[:, 1:]
     r0 = result.div(num_tokens, rounding_mode="trunc")
     r1 = result % num_tokens
+
     return r0, r1
 
 
@@ -224,7 +227,12 @@ def _ancestral_sample(
     log_post_sum = torch.zeros(1, 1, dtype=torch.long, device=device)
     xs_0, xs_1 = torch.full((2, n_samples, sample_tokens + 1),
                             fill_value=-1, dtype=torch.long, device=device)
+
+    # NOTE: shape of xs is torch.Size([10, 1025]), because n_sample = 10 and sample_tokens = 1024
+
+    # NOTE: in this case p.get_sos() returns the value 0
     xs_0[:, 0], xs_1[:, 0] = [p.get_sos() for p in priors]
+
     past_0, past_1 = (None, None)
     num_current_beams = 1
 
@@ -259,7 +267,9 @@ def _ancestral_sample(
             log_post_sum, (beams, coords_idx) = get_topk(
                 log_post_sum + posterior_data, n_samples)
             log_post_sum = log_post_sum.unsqueeze(-1)
+
             x_0, x_1 = ll_coords[:, coords_idx]
+
         else:
             raise RuntimeError(
                 f"Code {mixture[sample_t]} is not available in likelihood!")
@@ -279,6 +289,27 @@ def _ancestral_sample(
         # update the priors cache w.r.t. the current beams
         past_0 = prior_0._reorder_cache(past_0, beams)
         past_1 = prior_1._reorder_cache(past_1, beams)
+
+        # NOTE: Some info about the log post sum and x_0, x_1
+        # Log pos sum at t=45 is: tensor([[-90.5435],
+        # [-89.2126],
+        # [-91.1584],
+        # [-90.6628],
+        # [-92.5919],
+        # [-92.6901],
+        # [-92.9899],
+        # [-93.3323],
+        # [-92.9897],
+        # [-93.2421]]) with shape torch.Size([10, 1])
+
+        # x_0 at t=45 is tensor([255, 255, 255, 255, 255, 255, 255, 255, 255, 255]) with shape torch.Size([10])
+        # x_1 at t=45 is tensor([653, 653, 653, 653, 653, 653, 653, 653, 653, 653]) with shape torch.Size([10])
+
+        print(
+            f"Log pos sum at t={sample_t} is: {log_post_sum} with shape {log_post_sum.shape}")
+
+        print(f"x_0 at t={sample_t} is {x_0} with shape {x_0.shape}")
+        print(f"x_1 at t={sample_t} is {x_1} with shape {x_1.shape}")
 
     result_0, result_1 = xs_0[:num_current_beams,
                               1:], xs_1[:num_current_beams, 1:]

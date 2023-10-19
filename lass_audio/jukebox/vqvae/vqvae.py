@@ -49,6 +49,12 @@ class VQVAE(nn.Module):
                  emb_width, l_bins, mu, commit, spectral, multispectral,
                  multipliers=None, use_bottleneck=True, **block_kwargs):
         super().__init__()
+        """
+        Just a reminder on which arguments reprensents what:
+
+        - l_bins: the size of the discrete latent space (the K described in the VQ-VAE paper) [2048 in our case]
+        - emb_width: the dimension of the discrete codes (the D described in the VQ-VAE paper) [64 in our case]
+        """
 
         self.sample_length = input_shape[0]
         x_shape, x_channels = input_shape[:-1], input_shape[-1]

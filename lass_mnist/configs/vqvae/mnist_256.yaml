@@ -1,4 +1,4 @@
-_target_: modules.VectorQuantizedVAE
+_target_: lass_mnist.modules.VectorQuantizedVAE
 input_dim: 1
 dim: 128
 K: 256

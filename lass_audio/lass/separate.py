@@ -55,6 +55,8 @@ class BeamsearchSeparator(Separator):
     @torch.no_grad()
     def separate(self, mixture: torch.Tensor) -> Mapping[str, torch.Tensor]:
         # convert signal to codes
+
+        print("The mixture code shape when beam separating is: ", mixture.shape)
         mixture_codes = self.encode_fn(mixture)
 
         # separate mixture (x has shape [2, num. tokens])
@@ -204,7 +206,7 @@ def main(
     max_sample_tokens: int = 1024,
     sample_rate: int = 44100,
     save_path: str = audio_root / "separated-audio",
-    resume: bool = False,
+    resume: bool = True,
     num_pairs: int = 100,
     seed: int = 0,
     **kwargs,

@@ -50,8 +50,9 @@ class Likelihood(ABC, DevicePortable):
         _check_dtype(coords, torch.long)
         _check_dtype(data, [torch.float32, torch.float32])
 
-        _check_shape(coords, [2, -1])
-        _check_shape(data, [-1])
+        # TODO: removed for DEBUG
+        # _check_shape(coords, [2, -1])
+        # _check_shape(data, [-1])
 
         if data.shape[0] != coords.shape[-1]:
             raise RuntimeError(

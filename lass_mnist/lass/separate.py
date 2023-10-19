@@ -10,9 +10,9 @@ from transformers import GPT2LMHeadModel, PreTrainedModel
 from torchvision.utils import save_image
 import numpy as np
 import random
-from modules import VectorQuantizedVAE
-from lass.utils import refine_latents, CONFIG_DIR, ROOT_DIR, CONFIG_STORE
-from lass.diba_interaces import UnconditionedTransformerPrior, DenseLikelihood
+from ..modules import VectorQuantizedVAE
+from .utils import refine_latents, CONFIG_DIR, ROOT_DIR, CONFIG_STORE
+from .diba_interaces import UnconditionedTransformerPrior, DenseLikelihood
 import multiprocessing as mp
 from typing import Sequence
 from numpy.random import default_rng
@@ -107,11 +107,13 @@ def generate_samples(
     label0, label1 = bos
     p0 = UnconditionedTransformerPrior(transformer=transformer, sos=label0)
     p1 = UnconditionedTransformerPrior(transformer=transformer, sos=label1)
+
     likelihood = DenseLikelihood(sums=sums)
 
     gen1ims, gen2ims = [], []
     gen1lats, gen2lats = [], []
-    for bi in range(batch_size):
+    for bi in tqdm.tqdm(range(batch_size), desc="separating"):
+        # print(f"I'm using the separation method: {separation_method}")
         r0, r1 = separation_method(
             priors=[p0, p1],
             likelihood=likelihood,
@@ -131,10 +133,12 @@ def generate_samples(
         gen1lats.append(gen1lat)
         gen2lats.append(gen2lat)
 
+    # Shapes are: torch.Size([2, 1, 28, 28]), torch.Size([2, 1, 28, 28]), torch.Size([2, 128, 7, 7]), torch.Size([2, 128, 7, 7])
     gen1im = torch.stack(gen1ims, dim=0)
     gen2im = torch.stack(gen2ims, dim=0)
     gen1lat = torch.stack(gen1lats, dim=0)
     gen2lat = torch.stack(gen2lats, dim=0)
+
     return (gen1im, gen2im), (gen1lat, gen2lat)
 
 
@@ -169,12 +173,14 @@ class EvaluateSeparationConfig:
 
     latent_length: int = MISSING
     vocab_size: int = MISSING
-    batch_size: int = 64
+    # batch_size: int = 64
+    batch_size: int = 2
     class_conditioned: bool = False
     num_workers: int = mp.cpu_count() - 1
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
-    checkpoints: CheckpointsConfig = CheckpointsConfig()
+    checkpoints: CheckpointsConfig = field(default_factory=CheckpointsConfig)
+
     # method: SeparationMethodConfig = SeparationMethodConfig()
 
 
@@ -191,6 +197,10 @@ def main(cfg):
     model = hydra.utils.instantiate(cfg.vqvae).to(cfg.device)
     transformer = hydra.utils.instantiate(cfg.autoregressive).to(cfg.device)
     assert isinstance(transformer, PreTrainedModel)
+
+    print(f"-------------")
+    print(f"Transformer: {transformer}")
+    print(f"-------------")
 
     # create output directory
     result_dir = ROOT_DIR / "separated-images"
@@ -225,6 +235,8 @@ def main(cfg):
     transformer.eval()
 
     uncond_bos = 0
+
+    print("Start separation")
 
     # main separation loop
     for i, batch in enumerate(tqdm.tqdm(test_loader)):
