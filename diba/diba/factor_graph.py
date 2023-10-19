@@ -38,7 +38,8 @@ DEBUG = True
 
 if DEBUG:
     logging.basicConfig(filename='last_run.log', level=logging.DEBUG,
-                        format='%(name)s - %(levelname)s - %(message)s')
+                        format='%(name)s - %(levelname)s - %(message)s',
+                        filemode='w')
 
 
 def timeit(func):
@@ -79,9 +80,14 @@ class Variable:
         # Initialize only if it's a new instance
         if not hasattr(self, 'initialized'):
             self.neigh_factors = set()
-            self.outgoing_messages = set()
-            self.incoming_messages = set()
-            self.marginal = None
+            self.outgoing_messages: Set[Message] = set()
+            self.incoming_messages: Set[Message] = set()
+            self.classIdx = classIdx
+            self.idx = idx
+            self.mixture = mixture
+
+            # TODO: do not hardcode this
+            self.marginal = torch.full((256,), (1 / 256))
             self.initialized = True
 
     def __hash__(self):
@@ -106,6 +112,7 @@ class Factor:
             instance.type = type
             instance.idx = idx
             instance.connected_vars = connected_vars
+            instance.value = value
             Factor._factors[key] = instance
             return instance
 
@@ -113,8 +120,8 @@ class Factor:
         # Initialize only if it's a new instance
         if not hasattr(self, 'initialized'):
             self.value = value
-            self.incoming_messages = set()
-            self.outgoing_messages = set()
+            self.incoming_messages: Set[Message] = set()
+            self.outgoing_messages: Set[Message] = set()
             self.initialized = True
             self.connected_vars = connected_vars
             self.type = type
@@ -169,7 +176,6 @@ class SparseFactor:
 
 
 class Message:
-
     _messages = {}
 
     def __new__(cls, _from: Union[Factor, Variable, SparseFactor], _to: Union[Factor, Variable, SparseFactor], value: torch.Tensor):
@@ -241,7 +247,6 @@ class FactorGraph:
         # Initialize the factors #
         ##########################
 
-        # list of dictionaries, each dictionary is a factor
         self.factors: List[Factor] = []
 
         # add the marginal distribution of the mixture
@@ -281,7 +286,6 @@ class FactorGraph:
                                     connected_vars=[Variable(classIdx=j, idx=i),
                                                     Variable(classIdx=j, idx=i-1)],
                                     value=torch.full(size=(self.num_latent_codes, 2), fill_value=1/self.num_latent_codes))
-                    # value=torch.zeros((self.num_latent_codes, 2)))
 
                 self.factors.append(factor)
                 self.variables = self.variables.union(
@@ -331,33 +335,20 @@ class FactorGraph:
 
         for factor in self.factors:
 
+            # TODO: I think the message value shape should reflect the shape of the factor value,
+            # but in this case we will have some problems with the operations involving messages with different shapes
             for var in factor.connected_vars:
                 message_in = Message(
                     _from=factor, _to=var, value=torch.zeros((self.num_latent_codes, )))
                 message_out = Message(
                     _from=var, _to=factor, value=torch.zeros((self.num_latent_codes, )))
 
-                # TODO: remove this trick
-                for x in self.variables:
-                    if x == var:
-                        x.incoming_messages.add(message_in)
-                        x.outgoing_messages.add(message_out)
-                        x.neigh_factors.add(factor)
+                var.incoming_messages.add(message_in)
+                var.outgoing_messages.add(message_out)
+                var.neigh_factors.add(factor)
 
-                for f in self.factors:
-                    if f == factor:
-                        f.incoming_messages.add(message_out)
-                        f.outgoing_messages.add(message_in)
-
-        # TODO: remove this trick
-        # Trick for the variables
-        # for factor in self.factors:
-        #     log.debug(
-        #         f"Factor {factor} has connected vars before the trick: {factor.connected_vars}")
-        #     factor.connected_vars = [
-        #         var for var in self.variables if var in factor.connected_vars]
-        #     log.debug(
-        #         f"Factor {factor} has connected vars after the trick: {factor.connected_vars}")
+                factor.incoming_messages.add(message_out)
+                factor.outgoing_messages.add(message_in)
 
         total_connected_vars = set([
             var for fac in self.factors for var in fac.connected_vars])
@@ -386,32 +377,12 @@ class FactorGraph:
             (result[:row], result[row+1:]), dim=0)
         return result
 
-    def _stack_with_padding(self, tensor_list: List[torch.Tensor]) -> torch.Tensor:
-
-        assert len(tensor_list) > 0, "The list of tensors should not be empty"
-
-        # Transform the tensors all to the same rank
-        tensor_list = [t.unsqueeze(0) if len(t.shape) == 1 else t
-                       for t in tensor_list]
-
-        # Get the maximum shape in each dimension
-        max_shape = torch.tensor([max([t.shape[i] for t in tensor_list])
-                                  for i in range(len(tensor_list[0].shape))])
-
-        # Create a list of padded tensors
-        padded_tensors = [pad(t, (0, max_shape[1] - t.shape[1],
-                              0, max_shape[0] - t.shape[0])) for t in tensor_list]
-
-        # Stack the padded tensors along a new axis (if needed)
-        return torch.stack(padded_tensors)
-
     def _compute_sparse_likelihood(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         ll_coords, ll_data = self.likelihood.get_log_likelihood(
             self.mixture[idx])
         return ll_coords, ll_data
 
     def _compute_posterior(self, ll_data: torch.Tensor, ll_coords: torch.Tensor, priors: List[torch.Tensor]) -> torch.Tensor:
-
         prior_0, prior_1 = tuple(priors)
 
         posterior = _compute_log_posterior(
@@ -436,16 +407,6 @@ class FactorGraph:
 
         return probs
 
-    # def _from_padded_stack_to_tensors(shapes: List[torch.Size], padded_stack: torch.Tensor) -> List[torch.Tensor]:
-    #     extracted_tensors: List[torch.Tensor] = []
-    #     for shape in shapes:
-    #         # Get the original height and width
-    #         original_h, original_w = shape
-    #         # Extract the corresponding portion from the 'stacked_tensor'
-    #         extracted = padded_stack[:, :original_h, :original_w]
-    #         extracted_tensors.append(extracted)
-    #     return extracted_tensors
-
     @timeit
     def belief_propagation(self, iterations: int = 30):
         """
@@ -458,7 +419,11 @@ class FactorGraph:
                 for incoming_message in variable.incoming_messages:
                     factor = incoming_message._from
                     if factor.type == "mixture_marginal" or factor.type == "source_marginal":
-                        incoming_message.value = factor.value
+                        incoming_message.value = torch.log(factor.value)
+
+                        log.debug(
+                            f"Updated message for unary factor {factor}. The message {incoming_message} is: {incoming_message.value} with shape {incoming_message.value.shape}"
+                        )
 
             # Update all factor-to-variable messages
             non_unary_factors = [
@@ -510,6 +475,8 @@ class FactorGraph:
 
                 if factor.type == "posterior":
                     # Compute the posterior
+
+                    # TODO: I don't know if this is correct, since I'm grabbing the likelihood factor by index
                     likelihood_factor: SparseFactor = [
                         fac for fac in self.factors if fac.type == "likelihood" and fac.idx == factor.idx][0]
 
@@ -547,24 +514,58 @@ class FactorGraph:
                         The connected variables are: {factor.connected_vars}
                     """
 
+                    # TODO: don't know if this is correct
+                    if isinstance(factor, SparseFactor):
+                        value = torch.sparse_coo_tensor(
+                            factor.value_coords, factor.value_data, size=(self.num_latent_codes, self.num_latent_codes))
+                        value = value.to_dense()
+                        value = torch.softmax(value, dim=-1)
+                        log.debug(
+                            f"Non-zero values for the factor {factor} are: {value[value != 0]}")
+                    else:
+                        value = factor.value
+
                     log.debug(
                         f"Neigh variables to factor {factor}: {factor.connected_vars}")
+
+                    log.debug(
+                        f"Factor value is {value} with shape {value.shape}"
+                    )
 
                     variable_idx_in_factor = factor.connected_vars.index(
                         variable)
 
                     messages_from_var_to_factor = torch.stack([
-                        message.value for variable in factor.connected_vars for message in variable.outgoing_messages if message._to == factor], dim=0)
+                        message.value for message in factor.incoming_messages], dim=0)
 
-                    # TODO: the messages are always all zeros
                     log.debug(
                         f"Messages from variables to factor {factor}: {messages_from_var_to_factor}")
 
                     messages_from_var_to_factor_sum = torch.sum(
                         messages_from_var_to_factor, dim=0)
 
-                    updated_message = torch.log(
-                        torch.sum(self._element_wise_prod_excluding_row(factor.value.T, torch.exp(messages_from_var_to_factor_sum), variable_idx_in_factor), dim=0) + 1e-10)
+                    # # NOTE: If messagges are too big, the exp will return inf
+                    # assert (messages_from_var_to_factor_sum < 50).all(), f"""
+                    #     The messages from variables to factor {factor} are too big.
+                    #     The messages are: {messages_from_var_to_factor}
+                    #     The big numbers are: {messages_from_var_to_factor_sum[messages_from_var_to_factor_sum > 50]}
+                    # """
+
+                    log.debug(
+                        f"Sum of the messages from variables to factor {factor}: {messages_from_var_to_factor_sum}")
+
+                    sum_of_prod = torch.sum(self._element_wise_prod_excluding_row(value.T, torch.exp(
+                        messages_from_var_to_factor_sum), variable_idx_in_factor), dim=0)
+
+                    log.debug(
+                        f"Sum of the product for factor {factor} is: {sum_of_prod}")
+
+                    log_sum_prod = torch.log(sum_of_prod + 1e-7)
+
+                    log.debug(
+                        f"Log sum of the product for factor {factor} is: {log_sum_prod}, with a mean of {torch.mean(log_sum_prod)}")
+
+                    updated_message = log_sum_prod - torch.mean(log_sum_prod)
 
                     log.debug(
                         f"Updated message shape: {updated_message.shape}")
@@ -574,38 +575,38 @@ class FactorGraph:
                         The updated message for {outgoing_message} is nan during factor-to-variable message computation.
 
                         For debug: 
-                        factor.value: {factor.value}
+                        factor.value: {value}
                         messages_from_var_to_factor_sum: {messages_from_var_to_factor_sum}
                         exp: {torch.exp(messages_from_var_to_factor_sum)}
-                        simple_prod: {factor.value.T * torch.exp(messages_from_var_to_factor_sum)}
-                        element_wise_prod_excluding_row: {self._element_wise_prod_excluding_row(factor.value.T, torch.exp(messages_from_var_to_factor_sum), variable_idx_in_factor)}
-                        sum: {torch.sum(self._element_wise_prod_excluding_row(factor.value.T, torch.exp(messages_from_var_to_factor_sum), variable_idx_in_factor), dim=0)}
+                        simple_prod: {value.T * torch.exp(messages_from_var_to_factor_sum)}
+                        element_wise_prod_excluding_row: {self._element_wise_prod_excluding_row(value.T, torch.exp(messages_from_var_to_factor_sum), variable_idx_in_factor)}
+                        sum: {torch.sum(self._element_wise_prod_excluding_row(value.T, torch.exp(messages_from_var_to_factor_sum), variable_idx_in_factor), dim=0)}
                         updated_message (log): {updated_message}
                         """
 
                     outgoing_message.value = updated_message
 
-                    _var_message_from_factor = [
-                        message for message in variable.incoming_messages if message._from == factor]
-
-                    assert (_var_message_from_factor[0].value == updated_message).all(), f"""
-                    The updated message for {outgoing_message} is not the same as the incoming message for {variable} from {factor}.
-                    """
-
             # Update all variable-to-factor messages
             for variable in self.variables:
+                log.debug(
+                    f"Variable {variable} incoming messages are: {[variable.incoming_messages]}, outgoing messages are: {variable.outgoing_messages}")
                 for outgoing_message in variable.outgoing_messages:
                     factor: Factor = outgoing_message._to
 
                     incoming_messages = torch.stack(
                         [message.value for message in variable.incoming_messages if message._from != factor], dim=0)
 
-                    incoming_messages_sum = torch.sum(incoming_messages, dim=0)
+                    incoming_messages_sum = torch.sum(
+                        incoming_messages, dim=0)
+
+                    log.debug(
+                        f"Sum of the incoming messages for {variable} is: {incoming_messages_sum}")
 
                     assert not _check_if_nan_or_inf(
                         incoming_messages_sum), f"The updated message for {outgoing_message} is nan during variable-to-factor message computation"
 
-                    outgoing_message.value = incoming_messages_sum
+                    outgoing_message.value = incoming_messages_sum - \
+                        torch.mean(incoming_messages_sum)
 
             # Calculate Marginals for each iteration
             for variable in self.variables:
@@ -616,14 +617,33 @@ class FactorGraph:
                 sum_incoming_messages_stack = torch.sum(
                     incoming_messages_stack, dim=0)
 
-                variable.marginal = torch.softmax(
-                    sum_incoming_messages_stack, dim=-1)
+                # variable.marginal = torch.softmax(
+                #     sum_incoming_messages_stack, dim=-1)
+                variable.marginal = sum_incoming_messages_stack
+
+                sum_softmaxes_incoming_messages_stack = torch.sum(
+                    torch.softmax(incoming_messages_stack, dim=-1), dim=1)
 
                 log.debug(
-                    f"Variable {variable} incoming messages are: {incoming_messages_stack} with shape: {incoming_messages_stack.shape}. The sum of the messages is {torch.sum(incoming_messages_stack, dim=0)}")
+                    f"Sum of softmaxes of the incoming messages for {variable} is: {sum_softmaxes_incoming_messages_stack}"
+                )
+
+                assert sum_softmaxes_incoming_messages_stack.allclose(
+                    torch.ones_like(sum_softmaxes_incoming_messages_stack)), f"""
+                    The sum of the softmaxes of the incoming messages for {variable} is not 1.
+                    The sum is: {sum_softmaxes_incoming_messages_stack}
+                """
+
+                log.debug(
+                    f"Variable {variable} incoming messages are: {incoming_messages_stack} with shape: {incoming_messages_stack.shape}. The sum of the messages is {sum_incoming_messages_stack} with shape {sum_incoming_messages_stack.shape}. The dtype is {sum_incoming_messages_stack.dtype}")
 
                 print(
-                    f"Marginals for the variable {variable} after iteration {it} are: {variable.marginal}")
+                    f"Marginals for the variable {variable} after iteration {it} are: {variable.marginal} with shape {variable.marginal.shape}")
+
+                log.debug(
+                    f"Variable {variable} outgoing messages are: {torch.stack([message.value for message in variable.outgoing_messages], dim=0)}")
+                log.debug(
+                    f"Variable {variable} incoming messages are: {torch.stack([message.value for message in variable.incoming_messages], dim=0)}")
         return
 
 
