@@ -11,6 +11,8 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from diba.diba.interfaces import Likelihood, SeparationPrior
 from diba.diba.utils import get_topk, normalize_logits
 
+# from transformers.generation import GreedySearchDecoderOnlyOutput
+
 # def _print_beams(xs_0, xs_1, scores, posterior_data, ll_coords):
 #
 #     def _print_next_tokens(bi, xs, pi):
@@ -192,6 +194,11 @@ def separate(
     result = result.sequences[:, 1:]
     r0 = result.div(num_tokens, rounding_mode="trunc")
     r1 = result % num_tokens
+
+    print(f"r0 is {r0}")
+    print(f"r1 is {r1}")
+
+    raise RuntimeError("Stop here")
     return r0, r1
 
 
