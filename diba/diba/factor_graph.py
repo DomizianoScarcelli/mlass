@@ -3,12 +3,10 @@ from typing import Dict, List, Set, Tuple, Union
 import numpy as np
 import torch
 from tqdm import tqdm
-from diba.diba.diba import _compute_log_posterior
 from diba.diba.utils import normalize_logits
 
 from lass_mnist.lass.diba_interaces import DenseLikelihood, UnconditionedTransformerPrior
 from transformers import GPT2LMHeadModel, GPT2Config
-from torch.nn.functional import pad
 
 import logging
 
@@ -383,13 +381,27 @@ class FactorGraph:
         return ll_coords, ll_data
 
     def _compute_posterior(self, ll_data: torch.Tensor, ll_coords: torch.Tensor, priors: List[torch.Tensor]) -> torch.Tensor:
-        prior_0, prior_1 = tuple(priors)
+
+        def _compute_log_posterior(
+            nll_data: torch.Tensor,
+            nll_coords: torch.LongTensor,
+            log_priors: List[torch.Tensor],
+        ):
+            # TODO: verify if this is correct
+            num_sources = len(log_priors)
+
+            assert num_sources == nll_coords.shape[0], f"""
+                The number of sources is not the same as the number of likelihoods.
+                The number of sources is: {num_sources}
+                The number of likelihoods is: {nll_coords.shape[0]}
+            """
+
+            return nll_data + torch.sum(torch.stack([log_priors[i][:, nll_coords[i]] for i in range(num_sources)], dim=0), dim=0)
 
         posterior = _compute_log_posterior(
-            log_p0=prior_0,
-            log_p1=prior_1,
             nll_data=ll_data,
             nll_coords=ll_coords,
+            log_priors=priors,
         )
 
         num_tokens = self.likelihood.get_tokens_count()  # 256 in the case of MNIST
@@ -420,8 +432,8 @@ class FactorGraph:
                     factor = incoming_message._from
                     if factor.type == "mixture_marginal" or factor.type == "source_marginal":
                         incoming_message.value = torch.log(factor.value)
-                        incoming_message.value -= torch.mean(
-                            incoming_message.value)
+                        # incoming_message.value -= torch.mean(
+                        #     incoming_message.value)
 
                         log.debug(
                             f"Updated message for unary factor {factor}. The message {incoming_message} is: {incoming_message.value} with shape {incoming_message.value.shape}"
@@ -636,7 +648,7 @@ class FactorGraph:
         return torch.tensor(sources, dtype=torch.long)
 
     def separate(self) -> torch.Tensor:
-        self.belief_propagation(iterations=2)
+        self.belief_propagation(iterations=3)
         sources = self.sample_sources()
         return sources
 

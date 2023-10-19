@@ -28,8 +28,6 @@ from typing import Sequence
 from numpy.random import default_rng
 from torch.utils.data import Dataset
 
-from .belief_propagation import graphical_model_separation
-
 
 class PairsDataset(Dataset):
     def __init__(self, dataset: Sequence, seed: int = 0):
@@ -131,12 +129,12 @@ def generate_samples(
 
         z0, z1 = factor_graph.separate()
 
-        z0 = z0.reshape(-1, latent_length, latent_length)
-        z1 = z1.reshape(-1, latent_length, latent_length)
-
-        x0lat, x1lat = model.codes_to_latents(z0), model.codes_to_latents(z1)
-
-        x0, x1 = model.decode_latents(x0lat), model.decode_latents(x1lat)
+        (x0, x1), (x0lat, x1lat), _ = select_closest_to_mixture(
+            vqvae=model,
+            gen1=z0.reshape(-1, latent_length, latent_length),
+            gen2=z1.reshape(-1, latent_length, latent_length),
+            gt_mixture=gtm,
+        )
 
         gen1ims.append(x0)
         gen2ims.append(x1)
@@ -274,6 +272,7 @@ def main(cfg):
 
         gtm = (gt1 + gt2) / 2.0
 
+        print(f"Refining latents for batch {i}")
         gen1, gen2 = refine_latents(
             model,
             gen1lat,

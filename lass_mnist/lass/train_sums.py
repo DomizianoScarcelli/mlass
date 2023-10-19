@@ -8,7 +8,7 @@ import torch
 from omegaconf import MISSING
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.utils import make_grid
-from utils import CONFIG_DIR, CONFIG_STORE, ROOT_DIR
+from .utils import CONFIG_DIR, CONFIG_STORE, ROOT_DIR
 
 
 def roll(x, n):
