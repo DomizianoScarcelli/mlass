@@ -420,6 +420,8 @@ class FactorGraph:
                     factor = incoming_message._from
                     if factor.type == "mixture_marginal" or factor.type == "source_marginal":
                         incoming_message.value = torch.log(factor.value)
+                        incoming_message.value -= torch.mean(
+                            incoming_message.value)
 
                         log.debug(
                             f"Updated message for unary factor {factor}. The message {incoming_message} is: {incoming_message.value} with shape {incoming_message.value.shape}"
@@ -539,17 +541,17 @@ class FactorGraph:
                         message.value for message in factor.incoming_messages], dim=0)
 
                     log.debug(
-                        f"Messages from variables to factor {factor}: {messages_from_var_to_factor}")
+                        f"Messages from variables to factor {factor}: {messages_from_var_to_factor} ")
 
                     messages_from_var_to_factor_sum = torch.sum(
                         messages_from_var_to_factor, dim=0)
 
-                    # # NOTE: If messagges are too big, the exp will return inf
-                    # assert (messages_from_var_to_factor_sum < 50).all(), f"""
-                    #     The messages from variables to factor {factor} are too big.
-                    #     The messages are: {messages_from_var_to_factor}
-                    #     The big numbers are: {messages_from_var_to_factor_sum[messages_from_var_to_factor_sum > 50]}
-                    # """
+                    # NOTE: If messagges are too big, the exp will return inf
+                    assert (messages_from_var_to_factor_sum < 50).all(), f"""
+                        The messages from variables to factor {factor} are too big.
+                        The messages are: {messages_from_var_to_factor}
+                        The big numbers are: {messages_from_var_to_factor_sum[messages_from_var_to_factor_sum > 50]}
+                    """
 
                     log.debug(
                         f"Sum of the messages from variables to factor {factor}: {messages_from_var_to_factor_sum}")
@@ -596,6 +598,9 @@ class FactorGraph:
                     incoming_messages = torch.stack(
                         [message.value for message in variable.incoming_messages if message._from != factor], dim=0)
 
+                    log.debug(
+                        f"Incoming messages for {variable} are: {incoming_messages}")
+
                     incoming_messages_sum = torch.sum(
                         incoming_messages, dim=0)
 
@@ -605,45 +610,18 @@ class FactorGraph:
                     assert not _check_if_nan_or_inf(
                         incoming_messages_sum), f"The updated message for {outgoing_message} is nan during variable-to-factor message computation"
 
+                    # Computing marginal for the variable
+                    all_incoming_messages_stack = torch.sum(torch.stack(
+                        [message.value for message in variable.incoming_messages]), dim=0)
+
+                    variable.marginal = all_incoming_messages_stack
+
+                    print(
+                        f"Marginals for the variable {variable} after iteration {it} are: {variable.marginal} with shape {variable.marginal.shape}")
+
                     outgoing_message.value = incoming_messages_sum - \
-                        torch.mean(incoming_messages_sum)
+                        torch.log(torch.sum(torch.exp(incoming_messages_sum)))
 
-            # Calculate Marginals for each iteration
-            for variable in self.variables:
-
-                incoming_messages_stack = torch.stack(
-                    [message.value for message in variable.incoming_messages])
-
-                sum_incoming_messages_stack = torch.sum(
-                    incoming_messages_stack, dim=0)
-
-                # variable.marginal = torch.softmax(
-                #     sum_incoming_messages_stack, dim=-1)
-                variable.marginal = sum_incoming_messages_stack
-
-                sum_softmaxes_incoming_messages_stack = torch.sum(
-                    torch.softmax(incoming_messages_stack, dim=-1), dim=1)
-
-                log.debug(
-                    f"Sum of softmaxes of the incoming messages for {variable} is: {sum_softmaxes_incoming_messages_stack}"
-                )
-
-                assert sum_softmaxes_incoming_messages_stack.allclose(
-                    torch.ones_like(sum_softmaxes_incoming_messages_stack)), f"""
-                    The sum of the softmaxes of the incoming messages for {variable} is not 1.
-                    The sum is: {sum_softmaxes_incoming_messages_stack}
-                """
-
-                log.debug(
-                    f"Variable {variable} incoming messages are: {incoming_messages_stack} with shape: {incoming_messages_stack.shape}. The sum of the messages is {sum_incoming_messages_stack} with shape {sum_incoming_messages_stack.shape}. The dtype is {sum_incoming_messages_stack.dtype}")
-
-                print(
-                    f"Marginals for the variable {variable} after iteration {it} are: {variable.marginal} with shape {variable.marginal.shape}")
-
-                log.debug(
-                    f"Variable {variable} outgoing messages are: {torch.stack([message.value for message in variable.outgoing_messages], dim=0)}")
-                log.debug(
-                    f"Variable {variable} incoming messages are: {torch.stack([message.value for message in variable.incoming_messages], dim=0)}")
         return
 
 
