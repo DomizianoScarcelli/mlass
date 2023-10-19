@@ -180,8 +180,6 @@ class SumProductSeparator(Separator):
             # print(
             #     f"model after step 1 is: {model}")
 
-            # raise RuntimeError("STOP HERE MAN!")
-
             # TODO:
             # Step 4: Perform Inference and Sample each source z_i from P(z_i | m)
             # inference = VariableElimination(model)

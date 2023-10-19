@@ -133,10 +133,12 @@ def generate_samples(
         gen1lats.append(gen1lat)
         gen2lats.append(gen2lat)
 
+    # Shapes are: torch.Size([2, 1, 28, 28]), torch.Size([2, 1, 28, 28]), torch.Size([2, 128, 7, 7]), torch.Size([2, 128, 7, 7])
     gen1im = torch.stack(gen1ims, dim=0)
     gen2im = torch.stack(gen2ims, dim=0)
     gen1lat = torch.stack(gen1lats, dim=0)
     gen2lat = torch.stack(gen2lats, dim=0)
+
     return (gen1im, gen2im), (gen1lat, gen2lat)
 
 
@@ -171,7 +173,8 @@ class EvaluateSeparationConfig:
 
     latent_length: int = MISSING
     vocab_size: int = MISSING
-    batch_size: int = 64
+    # batch_size: int = 64
+    batch_size: int = 2
     class_conditioned: bool = False
     num_workers: int = mp.cpu_count() - 1
     device: str = "cuda" if torch.cuda.is_available() else "cpu"

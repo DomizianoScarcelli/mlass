@@ -34,7 +34,7 @@ Note: $\chi_f$ are the variables that are involved for the factor $f$
 """
 
 log = logging.getLogger("logger")
-DEBUG = True
+DEBUG = False
 
 if DEBUG:
     logging.basicConfig(filename='last_run.log', level=logging.DEBUG,
@@ -430,7 +430,7 @@ class FactorGraph:
             # Update all factor-to-variable messages
             non_unary_factors = [
                 fac for fac in self.factors if not (fac.type == "mixture_marginal" or fac.type == "source_marginal")]
-            for factor in tqdm(non_unary_factors, desc="Factor-to-Variable messages"):
+            for factor in non_unary_factors:
                 if factor.type == "prior":
                     for fac_var in factor.connected_vars:
                         # NOTE: in the case of uncoditional priors, the past is always None
@@ -616,13 +616,29 @@ class FactorGraph:
 
                     variable.marginal = all_incoming_messages_stack
 
-                    print(
-                        f"Marginals for the variable {variable} after iteration {it} are: {variable.marginal} with shape {variable.marginal.shape}")
+                    # print(
+                    #     f"Marginals for the variable {variable} after iteration {it} are: {variable.marginal} with shape {variable.marginal.shape}")
 
                     outgoing_message.value = incoming_messages_sum - \
                         torch.log(torch.sum(torch.exp(incoming_messages_sum)))
 
         return
+
+    def sample_sources(self) -> torch.Tensor:
+        sources = torch.zeros(self.num_sources, self.mixture_length)
+        for variable in self.variables:
+            if variable.classIdx is not None:
+                variable.marginal = torch.softmax(variable.marginal, dim=-1)
+                variable.marginal = variable.marginal.detach().cpu().numpy()
+                sample = np.random.choice(
+                    np.arange(self.num_latent_codes), p=variable.marginal)
+                sources[variable.classIdx, variable.idx] = sample
+        return torch.tensor(sources, dtype=torch.long)
+
+    def separate(self) -> torch.Tensor:
+        self.belief_propagation(iterations=2)
+        sources = self.sample_sources()
+        return sources
 
 
 def _test_build_pattern():
@@ -679,7 +695,6 @@ if __name__ == "__main__":
     factor_graph = FactorGraph(
         num_sources=2, mixture=mixture, likelihood=likelihood)
 
-    factor_graph.belief_propagation(iterations=100)
-    marginals: Dict[Variable, torch.Tensor] = {
-        var: torch.softmax(var.marginal, dim=-1) for var in factor_graph.variables}
-    print(marginals)
+    sources = factor_graph.separate()
+
+    print(f"The sampled sources are: {sources}")

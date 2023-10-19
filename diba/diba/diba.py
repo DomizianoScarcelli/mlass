@@ -195,10 +195,6 @@ def separate(
     r0 = result.div(num_tokens, rounding_mode="trunc")
     r1 = result % num_tokens
 
-    print(f"r0 is {r0}")
-    print(f"r1 is {r1}")
-
-    raise RuntimeError("Stop here")
     return r0, r1
 
 

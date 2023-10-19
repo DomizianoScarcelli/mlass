@@ -18,6 +18,8 @@ from torchvision.utils import save_image
 import numpy as np
 import random
 
+from diba.diba.factor_graph import FactorGraph
+
 from ..modules import VectorQuantizedVAE
 from .utils import refine_latents, CONFIG_DIR, ROOT_DIR, CONFIG_STORE
 from .diba_interaces import UnconditionedTransformerPrior, DenseLikelihood
@@ -99,7 +101,6 @@ def generate_samples(
     gts: Tuple[torch.Tensor, torch.Tensor],
     bos: Tuple[int, int],
     latent_length: int,
-    separation_method: Callable = None,
 ):
     gt1, gt2 = gts
     gtm = 0.5 * gt1 + 0.5 * gt2
@@ -110,43 +111,45 @@ def generate_samples(
 
     _, z_e_x_mixture, _ = model(gtm)
     codes_mixture = model.codeBook(z_e_x_mixture)
-    codes_mixture = codes_mixture.view(
-        batch_size, latent_length ** 2).tolist()  # (B, H**2)
+    # codes_mixture = codes_mixture.view(
+    #     batch_size, latent_length ** 2).tolist()  # (B, H**2)
 
-    # instantiate diba interface
     label0, label1 = bos
     p0 = UnconditionedTransformerPrior(transformer=transformer, sos=label0)
     p1 = UnconditionedTransformerPrior(transformer=transformer, sos=label1)
+
     likelihood = DenseLikelihood(sums=sums)
 
     gen1ims, gen2ims = [], []
     gen1lats, gen2lats = [], []
-    for bi in tqdm.tqdm(range(batch_size), desc="separating"):
-        r0, r1 = graphical_model_separation(
-            priors=[p0, p1],
-            likelihood=likelihood,
-            mixture=codes_mixture[bi],
-            latent_length=2048,  # TODO:, I don't know
-            num_sources=2
-        )
 
-        # get separation closer to mixture
-        (gen1im, gen2im), (gen1lat, gen2lat), _ = select_closest_to_mixture(
-            vqvae=model,
-            gen1=r0.reshape(-1, latent_length, latent_length),
-            gen2=r1.reshape(-1, latent_length, latent_length),
-            gt_mixture=gtm[bi:bi+1],
-        )
+    for mixture in tqdm.tqdm(codes_mixture, desc=f"Separating images"):
+        mixture = mixture.view(-1)
 
-        gen1ims.append(gen1im)
-        gen2ims.append(gen2im)
-        gen1lats.append(gen1lat)
-        gen2lats.append(gen2lat)
+        factor_graph = FactorGraph(
+            num_sources=2, mixture=mixture, likelihood=likelihood)
 
-    gen1im = torch.stack(gen1ims, dim=0)
-    gen2im = torch.stack(gen2ims, dim=0)
-    gen1lat = torch.stack(gen1lats, dim=0)
-    gen2lat = torch.stack(gen2lats, dim=0)
+        z0, z1 = factor_graph.separate()
+
+        z0 = z0.reshape(-1, latent_length, latent_length)
+        z1 = z1.reshape(-1, latent_length, latent_length)
+
+        x0lat, x1lat = model.codes_to_latents(z0), model.codes_to_latents(z1)
+
+        x0, x1 = model.decode_latents(x0lat), model.decode_latents(x1lat)
+
+        gen1ims.append(x0)
+        gen2ims.append(x1)
+        gen1lats.append(x0lat)
+        gen2lats.append(x1lat)
+
+    # Shapes are: torch.Size([2, (1), 1, 28, 28]), torch.Size([2, (1), 1, 28, 28]), torch.Size([2, (1), 128, 7, 7]), torch.Size([2, (1), 128, 7, 7])
+    # the (1) means that the size has been squeezed
+    gen1im = torch.stack(gen1ims, dim=0).squeeze(1)
+    gen2im = torch.stack(gen2ims, dim=0).squeeze(1)
+    gen1lat = torch.stack(gen1lats, dim=0).squeeze(1)
+    gen2lat = torch.stack(gen2lats, dim=0).squeeze(1)
+
     return (gen1im, gen2im), (gen1lat, gen2lat)
 
 
@@ -181,7 +184,9 @@ class EvaluateSeparationConfig:
 
     latent_length: int = MISSING
     vocab_size: int = MISSING
-    batch_size: int = 64
+    # batch_size: int = 64
+    # TODO: change it back to 64
+    batch_size: int = 2
     class_conditioned: bool = False
     num_workers: int = mp.cpu_count() - 1
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -265,8 +270,6 @@ def main(cfg):
             gts=[gt1, gt2],
             bos=[labels1, labels2],
             latent_length=cfg.latent_length,
-            # in this case cfg.separation_metho is diba.diba.fast_sampled_separation
-            separation_method=hydra.utils.instantiate(cfg.separation_method)
         )
 
         gtm = (gt1 + gt2) / 2.0
