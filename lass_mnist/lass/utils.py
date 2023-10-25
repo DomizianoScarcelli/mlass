@@ -1,6 +1,6 @@
 from pathlib import Path
 from typing import Tuple
-
+from tqdm import tqdm
 import torch
 from hydra.core.config_store import ConfigStore
 
@@ -55,7 +55,7 @@ def refine_latents(
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 100, 0.5)
 
     # optimize
-    for s in range(n_iterations):
+    for s in tqdm(range(n_iterations), desc="Refining latents"):
         geni1 = model.decode_latents(gen1)
         geni2 = model.decode_latents(gen2)
         geni_mixtures = (geni1 + geni2) / 2.0
