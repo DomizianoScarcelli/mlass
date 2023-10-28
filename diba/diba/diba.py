@@ -111,6 +111,7 @@ class _SeparationModel(PreTrainedModel):
         log_p_1 = normalize_logits(log_p_1, self.temperature)
 
         # log likelihood in sparse COO format
+        # ll_coords shape is torch.Size([2, 553]), while ll_data shape is torch.Size([553])
         assert isinstance(self.mixture[self.sample_t], int)
         ll_coords, ll_data = self.likelihood._get_log_likelihood(
             self.mixture[self.sample_t])

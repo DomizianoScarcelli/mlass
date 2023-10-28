@@ -32,10 +32,10 @@ Note: $\chi_f$ are the variables that are involved for the factor $f$
 """
 
 log = logging.getLogger("logger")
-DEBUG = True
+DEBUG = False
 
 if DEBUG:
-    logging.basicConfig(filename='last_run.log', level=logging.DEBUG,
+    logging.basicConfig(filename='factor_graph.log', level=logging.DEBUG,
                         format='%(name)s - %(levelname)s - %(message)s',
                         filemode='w')
 
@@ -384,21 +384,31 @@ class FactorGraph:
             self.mixture[idx])
         return ll_coords, ll_data
 
-    def _compute_posterior(self, ll_data: torch.Tensor, ll_coords: torch.Tensor, priors: List[torch.Tensor], idx: int) -> torch.Tensor:
+    def _compute_posterior(self, ll_data: torch.Tensor, ll_coords: torch.Tensor, priors: torch.Tensor, idx: int) -> torch.Tensor:
 
         def _compute_log_posterior(
             nll_data: torch.Tensor,
             nll_coords: torch.LongTensor,
-            log_priors: List[torch.Tensor],
+            log_priors: torch.Tensor,
         ):
-            # TODO: verify if this is correct
-            num_sources = len(log_priors)
 
-            assert num_sources == nll_coords.shape[0], f"""
-                The number of sources is not the same as the number of likelihoods.
-                The number of sources is: {num_sources}
-                The number of likelihoods is: {nll_coords.shape[0]}
-            """
+            # Inside the posterior computation, there are 2 priors, with shapes: [torch.Size([256, 256]), torch.Size([256, 256])]                          | 0/64 [00:00<?, ?it/s]
+            # Inside the posterior computation, there are 2 priors, with shapes: [torch.Size([1, 256]), torch.Size([1, 256])]
+            log.debug(
+                f"Inside the posterior computation the priors shape is: {log_priors.shape}")
+
+            log.debug(
+                f"Inside the posterior computation, nll_coords shape is {nll_coords.shape}, while nll_data shape is {nll_data.shape}")
+
+            # assert num_sources == nll_coords.shape[0], f"""
+            #     The number of sources is not the same as the number of likelihoods.
+            #     The number of sources is: {num_sources}
+            #     The number of likelihoods is: {nll_coords.shape[0]}
+            # """
+            dense_log_likelihood = torch.sparse_coo_tensor(
+                nll_coords, nll_data, size=(256, 256)).to_dense()
+
+            return log_priors + dense_log_likelihood
 
             return nll_data + torch.sum(torch.stack([log_priors[i][:, nll_coords[i]] for i in range(num_sources)], dim=0), dim=0)
 
@@ -408,29 +418,33 @@ class FactorGraph:
             log_priors=priors,
         )
 
-        num_tokens = self.likelihood.get_tokens_count()  # 256 in the case of MNIST
+        # num_tokens = self.likelihood.get_tokens_count()  # 256 in the case of MNIST
 
-        # Convert to shape (num samples, num_tokens*num_tokens)
-        coords0, coords1 = ll_coords
-        num_samples, _ = posterior.shape
-        logits = torch.full(size=(num_samples, num_tokens ** 2),
-                            fill_value=np.log(1e-16), device=torch.device("cpu"))
+        # # Convert to shape (num samples, num_tokens*num_tokens)
+        # coords0, coords1 = ll_coords
+        # num_samples, _ = posterior.shape
+        # logits = torch.full(size=(num_samples, num_tokens ** 2),
+        #                     fill_value=np.log(1e-16), device=torch.device("cpu"))
 
-        log.debug(
-            f"Logits shape in the posterior computation is: {logits.shape}, while posterior shape is: {posterior.shape}")
+        # log.debug(
+        #     f"Logits shape in the posterior computation is: {logits.shape}, while posterior shape is: {posterior.shape}")
 
-        logits.index_copy_(-1, coords0 * num_tokens +
-                           coords1, posterior)
+        # logits.index_copy_(-1, coords0 * num_tokens +
+        #                    coords1, posterior)
 
-        # Consider only the logits for the current token
-        logits = logits[idx, :]
+        # log.debug(
+        #     f"Logits shape in the posterior computation after the index copy is: {logits.shape}, while posterior shape is: {posterior.shape}")
 
-        log.debug(
-            f"Final Logits shape in the posterior computation is: {logits.shape}")
+        # # Consider only the logits for the current token
+        # logits = logits[idx, :]
 
-        probs = torch.softmax(logits, dim=-1).unsqueeze(0)
+        # log.debug(
+        #     f"Final Logits shape in the posterior computation is: {logits.shape}")
 
-        probs = probs.reshape(num_tokens, num_tokens)
+        # probs = torch.softmax(logits, dim=-1).unsqueeze(0)
+
+        # probs = probs.reshape(num_tokens, num_tokens)
+        probs = torch.softmax(posterior, dim=-1)
 
         return probs
 
@@ -548,18 +562,23 @@ class FactorGraph:
                     if prior_factor == []:
                         log.debug(f"Prior factor is empty")
 
-                        priors = [torch.full((self.num_latent_codes, self.num_latent_codes), 1.0 / self.num_latent_codes),
-                                  torch.full((self.num_latent_codes, self.num_latent_codes), 1.0 / self.num_latent_codes)]
+                        priors = torch.full(
+                            (self.num_latent_codes, self.num_latent_codes), 1.0 / self.num_latent_codes)
                     else:
                         log.debug(
                             f"Considering the prior factor {prior_factor}")
                         prior_factor = prior_factor[0]
+
+                        log.debug(
+                            f"Prior factor value shape is {prior_factor.value.shape}")
                         # TODO: don't know how to handle this, since I thought I had one prior for each source, but actually the prior is 256 x 256
-                        priors = [prior_factor.value[:, 0].unsqueeze(0),
-                                  prior_factor.value[:, 1].unsqueeze(0)]
+                        # priors = [prior_factor.value[:, 0].unsqueeze(0),
+                        #           prior_factor.value[:, 1].unsqueeze(0)]
+                        priors = prior_factor.value
 
                     # Convert the probabilities to log probabilities
-                    priors = [torch.log(prior) for prior in priors]
+                    # priors = [torch.log(prior) for prior in priors]
+                    priors = torch.log(priors)
 
                     ll_coords, ll_data = likelihood_factor.value_coords, likelihood_factor.value_data
                     updated_posterior = self._compute_posterior(

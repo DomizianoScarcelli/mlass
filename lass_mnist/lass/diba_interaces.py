@@ -54,6 +54,12 @@ class DenseLikelihood(Likelihood):
 
     @functools.lru_cache(512)
     def get_log_likelihood(self, token_idx: int) -> Tuple[torch.LongTensor, torch.Tensor]:
+        # Shape of mixture_slice is (num_tokens, num_tokens) (In the case of MNIST this is 256x256)
         mixture_slice = self.sum[:, :, token_idx]
+        # The coords shape is (2, non_zero) (In the case of MNIST this is 2xnon_zero)
         coords = torch.nonzero(mixture_slice).transpose(0, 1)
         return coords, torch.log(mixture_slice[coords[0], coords[1]])
+
+    def get_dense_log_likelihood(self, token_idx: int) -> torch.Tensor:
+        mixture_slice = self.sum[:, :, token_idx]
+        return torch.log(mixture_slice)
