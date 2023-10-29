@@ -60,7 +60,7 @@ class DenseLikelihood(Likelihood):
         coords = torch.nonzero(mixture_slice).transpose(0, 1)
         return coords, torch.log(mixture_slice[coords[0], coords[1]])
 
-    def get_dense_log_likelihood(self, token_idx: Union[int, None]) -> torch.Tensor:
+    def get_dense_log_likelihood(self, token_idx: Union[int, None] = None) -> torch.Tensor:
         if token_idx is None:
             return self.sum
         mixture_slice = self.sum[:, :, token_idx]

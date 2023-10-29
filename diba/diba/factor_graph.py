@@ -1,6 +1,5 @@
 import time
 from typing import Dict, List, Set, Tuple, Union
-import numpy as np
 import torch
 from tqdm import tqdm
 from diba.diba.utils import normalize_logits
@@ -48,11 +47,6 @@ def timeit(func):
         log.debug(f"{func.__name__} took {end_time - start_time} seconds.")
         return result
     return wrapper
-
-
-def dprint(*args, **kwargs):
-    if DEBUG:
-        print(*args, **kwargs)
 
 
 def _check_if_nan_or_inf(tensor: torch.Tensor) -> bool:
@@ -175,14 +169,14 @@ class Factor:
 
     def __init__(self, type: str, idx: int, connected_vars: List[Variable], value: torch.Tensor):
         # Initialize only if it's a new instance
-        if not hasattr(self, 'initialized'):
-            self.value = value
-            self.incoming_messages: Set[Message] = set()
-            self.outgoing_messages: Set[Message] = set()
-            self.initialized = True
-            self.connected_vars = connected_vars
-            self.type = type
-            self.idx = idx
+        self.value = value
+        self.incoming_messages: Set[Message] = set()
+        self.outgoing_messages: Set[Message] = set()
+        self.initialized = True
+        self.connected_vars = connected_vars
+        self.type = type
+        self.idx = idx
+        self.marginals: List[torch.Tensor] = []
 
     def __hash__(self):
         return hash((self.type, self.idx, tuple(self.connected_vars)))
@@ -278,6 +272,7 @@ class FactorGraph:
         # always None in the case of uncoditional priors
         self.pasts = [None for _ in range(self.num_sources)]
         self.likelihood = likelihood
+        self.marginals: List[torch.Tensor] = []
 
         log.debug(f"Length of the mixture is: {self.mixture_length}")
 
@@ -325,6 +320,9 @@ class FactorGraph:
         # add the autoregressive priors
         # p(z^1_i | z^1_{i-1}), p(z^2_i | z^2_{i-1}), ..., p(z^k_i | z^k_{i-1})
         # the first prior is null
+        # TODO: The shape should be (num_sources, num_latent_codes, num_latent_codes)
+        # if the prior is conditioned to the class index, otherwise it should be (num_latent_codes, num_latent_codes)
+
         factor = NewFactor(type="prior",
                            value=torch.full(size=(self.num_sources,
                                                   self.num_latent_codes,
@@ -336,7 +334,7 @@ class FactorGraph:
         # add the posterior factors
         # p(z^j_i | m_i)
         factor = NewFactor(type="posterior",
-                           value=torch.full(size=(self.num_sources,
+                           value=torch.full(size=(self.num_latent_codes,
                                                   self.num_latent_codes,
                                                   self.num_latent_codes),
                                             fill_value=1/self.num_latent_codes))
@@ -394,18 +392,65 @@ class FactorGraph:
         Returns the discrete likelihood K x K x ... K (m+1 times) matrix, where m is the number of sources and K is the number of latent codes.
         This models the likelihood p(m|z^1, z^2, ..., z^m)
         """
+
         return self.likelihood.get_dense_log_likelihood()
 
-    def _compute_dense_log_posterior(self, prior: torch.Tensor) -> torch.Tensor:
+    def _compute_dense_log_posterior(self, log_prior: torch.Tensor) -> torch.Tensor:
         """
         Returns the discrete posterior K x K x ... K (m times) matrix, where m is the number of sources and K is the number of latent codes.
         This models the posterior p(z^i| m) for all the is.
         """
-        return prior + self._compute_dense_likelihood()
+        log.debug(
+            f"Dense likelihood shape is: {self.likelihood.get_dense_log_likelihood().shape}")
+        log.debug(f"Prior shape is: {log_prior.shape}")
 
-    def _compute_autoregressive_prior(self):
+        log_likelihood = self.likelihood.get_dense_log_likelihood()
+        # TODO: i'm just doing this for debugging reasons, the posterior should be (2,256,256,256) if class conditioned
+        source = 0
+        log_posterior = log_likelihood + log_prior[source, :, :]
+        # Iterate over each source and compute the log_posterior
+        return log_posterior
+
+    def _update_autoregressive_prior(self):
         """
-        Compute the autoregressive prior p(z^j_i | z^j_{i-1}) for all the j and i.
+        Updates the value for the factor that refers to the autoregressive priors 
+        p(z^j_i | z^j_{i-1}) for all the j and i.
+        """
+        log.debug(f"Computing the autoregressive priors")
+        prior_factor = [
+            factor for factor in self.factors if factor.type == "prior"][0]
+        for class_idx in range(self.num_sources):
+            class_prior: UnconditionedTransformerPrior = self.priors[class_idx]
+            past = self.pasts[class_idx]
+            for i in range(self.mixture_length):
+                observed_mixture = self.mixture[i].unsqueeze(
+                    0).unsqueeze(0).to(torch.long)
+                log_priors, new_past = class_prior.get_logits(
+                    token_ids=observed_mixture,
+                    past_key_values=past)
+                self.pasts[class_idx] = new_past
+                prob_priors = torch.softmax(log_priors, dim=-1)
+                updated_factor_value = prob_priors.squeeze(0)
+                prior_factor.value[class_idx, i, :] = updated_factor_value
+
+    def _update_posterior(self):
+        """
+        Updates the value for the factor that refers to the posterior
+        """
+        log.debug(f"Computing the posterior")
+        posterior_factor = [
+            factor for factor in self.factors if factor.type == "posterior"][0]
+        prior_factor = [
+            factor for factor in self.factors if factor.type == "prior"][0]
+
+        posterior_value = self._compute_dense_log_posterior(
+            log_prior=prior_factor.value)
+
+        posterior_factor.value = posterior_value
+
+    def _update_marginals(self):
+        """
+        Updates the marginals for all the variables
         """
         pass
 
@@ -444,7 +489,7 @@ class FactorGraph:
 
         return probs
 
-    def aggregate_messages(self, messages):
+    def aggregate_messages(self, messages, operation="sum"):
         """Aggregates incoming messages into a variable via a summation to compute the marginals.
 
         Args:
@@ -459,17 +504,22 @@ class FactorGraph:
         # Reshape the incoming messages to the same shape.
         messages: List[torch.Tensor] = torch.broadcast_tensors(*messages)
 
-        log.debug(
-            f"After the aggregatiojn, there are {len(messages)} messages, with shapes: {[message.shape for message in messages]}")
+        # log.debug(
+        #     f"After the aggregation, there are {len(messages)} messages, with shapes: {[message.shape for message in messages]}")
 
         messages: torch.Tensor = torch.stack(messages, dim=0)
 
-        log.debug(
-            f"After the stacking, the aggregated message shape is: {messages.shape}"
-        )
+        # log.debug(
+        #     f"After the stacking, the aggregated message shape is: {messages.shape}"
+        # )
 
-        # Sum the incoming messages.
-        aggregated_messages = torch.sum(messages, dim=0)
+        if operation == "sum":
+            # Sum the incoming messages.
+            aggregated_messages = torch.sum(messages, dim=0)
+        else:
+            raise NotImplementedError(
+                f"Aggreagtion via the operation {operation} is not implemented yet"
+            )
 
         return aggregated_messages
 
@@ -480,6 +530,13 @@ class FactorGraph:
         """
 
         for it in tqdm(range(iterations), desc="Belief Propagation"):
+            # NOTE: Brainstorming: https://chat.openai.com/share/b9eabf18-3d2d-475b-9b97-c080c9341661
+            # Computing the local factor values:
+            for factor in self.factors:
+                if factor.type == "prior":
+                    self._update_autoregressive_prior()
+                if factor.type == "posterior":
+                    self._update_posterior()
             # Update all factor-to-variable messages
             for (factor, class_idx), message in self.msg_fv.items():
                 # Unary factors
@@ -487,9 +544,7 @@ class FactorGraph:
                     self.msg_fv[(factor, class_idx)] = torch.log(factor.value)
                 # Non unary factors
                 else:
-                    if factor.type == "prior" or factor.type == "posterior":
-                        # I don't know if I can update the prior and the posterior in the same way.
-                        # I think the code for the prior is correct btw
+                    if factor.type == "prior":
 
                         log.debug(
                             f"Factor {factor} has a value with shape {factor.value.shape}")
@@ -510,10 +565,13 @@ class FactorGraph:
                         self.msg_fv[(factor, class_idx)
                                     ] = updated_message
 
-                    if factor.type == "likelihood":
-                        # You may remove this loop
+                    if factor.type == "likelihood" or factor.type == "posterior":
+                        # TODO: I don't know if I can update the prior and the posterior in the same way.
+
                         stacked_updated_messages = torch.zeros(
                             size=(self.num_latent_codes, self.num_latent_codes, self.num_latent_codes))
+
+                        # TODO: change this when you will deal with more than 2 sources
                         for i in range(self.num_latent_codes):
 
                             updated_message_z1 = factor.value[i, :, :] * torch.exp(
@@ -537,250 +595,66 @@ class FactorGraph:
                                     ] = stacked_updated_messages
 
             log.debug(f"Updated unary factor-to-variable messages")
-            raise Exception("STOPPP")
-
-            # Update all factor-to-variable messages
-
-            non_unary_factors = [
-                fac for fac in self.factors if not (fac.type == "mixture_marginal" or fac.type == "source_marginal")]
-            for factor in non_unary_factors:
-                if factor.type == "prior":
-                    for fac_var in factor.connected_vars:
-                        # NOTE: in the case of uncoditional priors, the past is always None
-                        class_prior: UnconditionedTransformerPrior = self.priors[fac_var.class_idx]
-
-                        past = self.pasts[fac_var.class_idx]
-
-                        log.debug(f"Factor value idx is: {fac_var.idx}")
-                        log.debug(
-                            f"Mixture is {self.mixture} with shape: {self.mixture.shape}")
-                        observed_mixture = self.mixture[fac_var.idx].unsqueeze(
-                            0).unsqueeze(0).to(torch.long)
-
-                        log.debug(
-                            f"Obseved mixture is: {observed_mixture}")
-
-                        log_priors, new_past = class_prior.get_logits(
-                            token_ids=observed_mixture,
-                            past_key_values=past)
-
-                        log.debug(
-                            f"Log priors before normalization for {fac_var} are: {log_priors} with shape {log_priors.shape}")
-
-                        # TODO: don't know if this is needed
-                        # log_priors = normalize_logits(log_priors)
-
-                        log.debug(
-                            f"Log priors after normalization for {fac_var} are: {log_priors} with shape {log_priors.shape}")
-
-                        self.pasts[fac_var.class_idx] = new_past
-
-                        prob_priors = torch.softmax(log_priors, dim=-1)
-
-                        updated_factor_value = prob_priors.squeeze(0)
-
-                        assert not _check_if_nan_or_inf(
-                            updated_factor_value), f"The updated factor value for {factor} value is nan during autoregressive prior computation"
-
-                        factor.value[:,
-                                     fac_var.class_idx] = updated_factor_value
-
-                if factor.type == "likelihood":
-                    # Compute the likelihood
-                    ll_coords, ll_data = self._compute_sparse_likelihood(
-                        factor.idx)
-                    factor.value_coords = ll_coords
-                    factor.value_data = ll_data
-
-                if factor.type == "posterior":
-                    # Compute the posterior
-
-                    # TODO: I don't know if this is correct, since I'm grabbing the likelihood factor by index
-                    likelihood_factor: SparseFactor = [
-                        fac for fac in self.factors if fac.type == "likelihood" and fac.idx == factor.idx][0]
-
-                    prior_factor: Factor = [
-                        fac for fac in self.factors if fac.type == "prior" and fac.idx == factor.idx]
-
-                    if prior_factor == []:
-                        log.debug(f"Prior factor is empty")
-
-                        priors = torch.full(
-                            (self.num_latent_codes, self.num_latent_codes), 1.0 / self.num_latent_codes)
-                    else:
-                        log.debug(
-                            f"Considering the prior factor {prior_factor}")
-                        prior_factor = prior_factor[0]
-
-                        log.debug(
-                            f"Prior factor value shape is {prior_factor.value.shape}")
-                        # TODO: don't know how to handle this, since I thought I had one prior for each source, but actually the prior is 256 x 256
-                        # priors = [prior_factor.value[:, 0].unsqueeze(0),
-                        #           prior_factor.value[:, 1].unsqueeze(0)]
-                        priors = prior_factor.value
-
-                    # Convert the probabilities to log probabilities
-                    # priors = [torch.log(prior) for prior in priors]
-                    priors = torch.log(priors)
-
-                    ll_coords, ll_data = likelihood_factor.value_coords, likelihood_factor.value_data
-                    updated_posterior = self._compute_posterior(
-                        ll_data=ll_data, ll_coords=ll_coords, priors=priors, idx=factor.idx)
-
-                    log.debug(
-                        f"Updated posterior for idx: {factor.idx} is {updated_posterior}, with shape {updated_posterior.shape}")
-
-                    factor.value = updated_posterior
-
-                for outgoing_message in factor.outgoing_messages:
-                    log.debug(f"-------------------")
-                    variable: Variable = outgoing_message._to
-                    log.debug(f"Factor: {factor}")
-                    log.debug(f"Variable: {variable}")
-
-                    assert variable in factor.connected_vars, f"""
-                        The variable {variable} is not connected to the factor {factor}.
-                        The connected variables are: {factor.connected_vars}
-                    """
-
-                    # TODO: don't know if this is correct
-                    if isinstance(factor, SparseFactor):
-                        value = torch.sparse_coo_tensor(
-                            factor.value_coords, factor.value_data, size=(self.num_latent_codes, self.num_latent_codes))
-                        value = value.to_dense()
-                        value = torch.softmax(value, dim=-1)
-                        log.debug(
-                            f"Non-zero values for the factor {factor} are: {value[value != 0]}")
-                    else:
-                        value = factor.value
-
-                    log.debug(
-                        f"Neigh variables to factor {factor}: {factor.connected_vars}")
-
-                    log.debug(
-                        f"Factor value is {value} with shape {value.shape}"
-                    )
-
-                    variable_idx_in_factor = factor.connected_vars.index(
-                        variable)
-
-                    broadcasted_messages = torch.broadcast_tensors(
-                        *[message.value for message in variable.incoming_messages])
-
-                    messages_from_var_to_factor = torch.stack(
-                        broadcasted_messages, dim=0)
-
-                    log.debug(
-                        f"Messages from variables to factor {factor}: {messages_from_var_to_factor} ")
-
-                    messages_from_var_to_factor_sum = torch.sum(
-                        messages_from_var_to_factor, dim=0)
-
-                    # NOTE: If messagges are too big, the exp will return inf
-                    assert (messages_from_var_to_factor_sum < 50).all(), f"""
-                        The messages from variables to factor {factor} are too big.
-                        The messages are: {messages_from_var_to_factor}
-                        The big numbers are: {messages_from_var_to_factor_sum[messages_from_var_to_factor_sum > 50]}
-                    """
-
-                    log.debug(
-                        f"Sum of the messages from variables to factor {factor}: {messages_from_var_to_factor_sum}")
-
-                    sum_of_prod = torch.sum(self._element_wise_prod_excluding_row(value.T, torch.exp(
-                        messages_from_var_to_factor_sum), variable_idx_in_factor), dim=0)
-
-                    log.debug(
-                        f"Sum of the product for factor {factor} is: {sum_of_prod}")
-
-                    log_sum_prod = torch.log(sum_of_prod + 1e-7)
-
-                    log.debug(
-                        f"Log sum of the product for factor {factor} is: {log_sum_prod}, with a mean of {torch.mean(log_sum_prod)}")
-
-                    updated_message = log_sum_prod - torch.mean(log_sum_prod)
-
-                    log.debug(
-                        f"Updated message shape: {updated_message.shape}")
-
-                    assert not _check_if_nan_or_inf(
-                        updated_message), f"""
-                        The updated message for {outgoing_message} is nan during factor-to-variable message computation.
-
-                        For debug: 
-                        factor.value: {value}
-                        messages_from_var_to_factor_sum: {messages_from_var_to_factor_sum}
-                        exp: {torch.exp(messages_from_var_to_factor_sum)}
-                        simple_prod: {value.T * torch.exp(messages_from_var_to_factor_sum)}
-                        element_wise_prod_excluding_row: {self._element_wise_prod_excluding_row(value.T, torch.exp(messages_from_var_to_factor_sum), variable_idx_in_factor)}
-                        sum: {torch.sum(self._element_wise_prod_excluding_row(value.T, torch.exp(messages_from_var_to_factor_sum), variable_idx_in_factor), dim=0)}
-                        updated_message (log): {updated_message}
-                        """
-
-                    outgoing_message.value = updated_message
 
             # Update all variable-to-factor messages
-            for variable in self.variables:
+            # NOTE: I just have to take the sum of the incoming messages, except for the one that is coming from the factor itself
+            for (class_idx, factor), message in self.msg_vf.items():
+                incoming_messages = [
+                    message for fact in self.factors for message in self.msg_fv[(fact, class_idx)] if f != factor]
+
+                sum_incoming_messags = self.aggregate_messages(
+                    incoming_messages)
+
                 log.debug(
-                    f"Variable {variable} incoming messages are: {[variable.incoming_messages]}, outgoing messages are: {variable.outgoing_messages}")
-                for outgoing_message in variable.outgoing_messages:
-                    factor: Factor = outgoing_message._to
+                    f"There are {len(incoming_messages)} incoming messages for the variable {class_idx} (excluding the one from the factor {factor})")
+                log.debug(
+                    f"The shapes of the messages are {[message.shape for message in incoming_messages]}")
+                log.debug(
+                    f"The shape of sum_incoming_messags is {sum_incoming_messags.shape}")
 
-                    # In a certain case, the shapes of the incoming message are
-                    # [torch.Size([256, 256]), torch.Size([256]), torch.Size([256]), torch.Size([256])]
+                self.msg_vf[(class_idx, factor)] = sum_incoming_messags
 
-                    incoming_messages = [
-                        message.value for message in variable.incoming_messages if message._from != factor]
+        # Compute the marginals for all the variables
+        for (class_idx, factor), message in self.msg_vf.items():
+            incoming_messages = [
+                message for fact in self.factors for message in self.msg_fv[(fact, class_idx)]]
 
-                    log.debug(
-                        f"Incoming messages for {variable} are: {incoming_messages}")
+            self.marginals[class_idx] = self.aggregate_messages(
+                incoming_messages)
 
-                    incoming_messages_sum = self.aggregate_messages(
-                        incoming_messages)
+        log.debug(
+            f"At the end of the belief propagation, the marginals are: {self.marginals}")
 
-                    log.debug(
-                        f"Sum of the incoming messages for {variable} is: {incoming_messages_sum}")
-
-                    assert not _check_if_nan_or_inf(
-                        incoming_messages_sum), f"The updated message for {outgoing_message} is nan during variable-to-factor message computation"
-
-                    # Computing marginal for the variable
-                    all_incoming_messages_stack = self.aggregate_messages(
-                        [message.value for message in variable.incoming_messages]),
-
-                    variable.marginal = all_incoming_messages_stack
-
-                    # print(
-                    #     f"Marginals for the variable {variable} after iteration {it} are: {variable.marginal} with shape {variable.marginal.shape}")
-
-                    outgoing_message.value = incoming_messages_sum - \
-                        torch.log(torch.sum(torch.exp(incoming_messages_sum)))
-
+        raise NotImplementedError("This is not implemented yet")
         return
 
     def sample_sources(self) -> torch.Tensor:
-        sources = torch.zeros(self.num_sources, self.mixture_length)
-        for variable in self.variables:
-            if variable.class_idx is not None:
-                logits = variable.marginal[0]
+        # Sample mixture_length times from the marginal distribution of each variable
+        pass
 
-                # Create a Gumbel noise tensor
-                gumbel_noise = torch.empty_like(logits).uniform_()
+        # sources = torch.zeros(self.num_sources, self.mixture_length)
+        # for variable in self.variables:
+        #     if variable.class_idx is not None:
+        #         logits = variable.marginal[0]
 
-                # Add the Gumbel noise tensor to the logits tensor
-                logits_with_noise = logits + gumbel_noise
+        #         # Create a Gumbel noise tensor
+        #         gumbel_noise = torch.empty_like(logits).uniform_()
 
-                # Take the softmax of the resulting tensor
-                probs = torch.softmax(logits_with_noise, dim=-1)
+        #         # Add the Gumbel noise tensor to the logits tensor
+        #         logits_with_noise = logits + gumbel_noise
 
-                # Sample from the tensor of probabilities
-                samples = torch.multinomial(probs, num_samples=1)
+        #         # Take the softmax of the resulting tensor
+        #         probs = torch.softmax(logits_with_noise, dim=-1)
 
-                sample = samples[0]
+        #         # Sample from the tensor of probabilities
+        #         samples = torch.multinomial(probs, num_samples=1)
 
-                log.debug(f"Sample for variable {variable} is: {sample}")
+        #         sample = samples[0]
 
-                sources[variable.class_idx, variable.idx] = sample
-        return torch.tensor(sources, dtype=torch.long)
+        #         log.debug(f"Sample for variable {variable} is: {sample}")
+
+        #         sources[variable.class_idx, variable.idx] = sample
+        # return torch.tensor(sources, dtype=torch.long)
 
     def separate(self) -> torch.Tensor:
         self.belief_propagation(iterations=20)
@@ -788,50 +662,14 @@ class FactorGraph:
         return sources
 
 
-def _test_build_pattern():
-    var1 = Variable(class_idx=0, idx=0)
-    var2 = Variable(class_idx=0, idx=0)
-
-    assert var1 == var2, f"{var1} is not equal to {var2}"
-
-    fac1 = Factor(type="test", idx=0, connected_vars=[
-                  var1], value=torch.zeros((1, 2)))
-    fac2 = Factor(type="test", idx=0, connected_vars=[
-                  var2], value=torch.zeros((1, 2)))
-
-    assert fac1 == fac2, f"{fac1} is not equal to {fac2}"
-
-    sparse_fac1 = SparseFactor(type="test", idx=0, connected_vars=[
-        var1], value_coords=torch.zeros((1, 2)), value_data=torch.zeros((1,)))
-    sparse_fac2 = SparseFactor(type="test", idx=0, connected_vars=[
-                                    var2], value_coords=torch.zeros((1, 2)), value_data=torch.zeros((1,)))
-
-    assert sparse_fac1 == sparse_fac2, f"{sparse_fac1} is not equal to {sparse_fac2}"
-
-    message1 = Message(_from=fac1, _to=var1, value=torch.zeros((1, 2)))
-    message2 = Message(_from=fac2, _to=var2, value=torch.zeros((1, 2)))
-
-    assert message1 == message2, f"{message1} is not equal to {message2}"
-
-    tricky_message_1 = Message(_from=fac1, _to=Variable(
-        class_idx=0, idx=0), value=torch.zeros((1, 2)))
-
-    assert tricky_message_1 == message1, f"{tricky_message_1} is not equal to {message1}"
-
-
 if __name__ == "__main__":
-    ###############################
-    # Test the factor graph class #
-    ###############################
-    _test_build_pattern()
-
     #############
     # Main code #
     #############
 
-    MIXTURE_LENGTH = 49
     mixture = torch.tensor([210, 135, 8, 202, 135, 8, 56, 39, 63, 168, 149, 119, 70, 56, 137, 149, 93, 217, 217, 217, 8, 210, 66,
                             254, 26, 9, 168, 135, 210, 29, 26, 88, 222, 75, 210, 56, 56, 88, 4, 34, 80, 8, 56, 137, 75, 7, 41, 8, 56])
+    # MIXTURE_LENGTH = 49
 
     SUMS_CHECKPOINT_PATH = "lass_mnist/checkpoints/sum/256-sigmoid-big.pt"
     with open(SUMS_CHECKPOINT_PATH, 'rb') as f:
