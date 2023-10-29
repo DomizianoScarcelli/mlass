@@ -90,11 +90,11 @@ class FactorGraph:
         self.num_sources = num_sources  # 'k' in the equations
         self.mixture = mixture  # 'm' in the equations
         self.mixture_length = len(mixture)  # 'n' in the equations
-        self.num_latent_codes = 256  # 256 in the case of MNIST
-        # self.variables: Set[Variable] = set()
+
         # always None in the case of uncoditional priors
         self.pasts = [None for _ in range(self.num_sources)]
         self.likelihood = likelihood
+        self.num_latent_codes = self.likelihood.get_tokens_count()  # 256 in the case of MNIST
         self.marginals: torch.Tensor = []
 
         log.debug(f"Length of the mixture is: {self.mixture_length}")
@@ -122,57 +122,32 @@ class FactorGraph:
         # Initialize the factors #
         ##########################
 
+        # TODO: change it in a dictionary in order to get a factor of a certain type with a lookup
         self.factors: List[NewFactor] = []
 
-        # add the marginal distribution of the mixture
-        # p(m_1), p(m_2), ..., p(m_n)
-        factor = NewFactor(type="mixture_marginal",
-                           value=torch.full(size=(1, self.num_latent_codes),
-                                            fill_value=1.0 / self.num_latent_codes))
-
-        # TODO: I don't know if I should add this factor
-        # self.factors.append(factor)
-
-        # add the marginal distribution of the sources
-        # p(z^j_1), p(z^j_2), ..., p(z^j_n)
-        factor = NewFactor(type="source_marginal",
-                           value=torch.full(size=(self.num_sources,
-                                                  self.num_latent_codes),
-                                            fill_value=1.0 / self.num_latent_codes))
-        # TODO: I don't know if I should add this factor
-        # self.factors.append(factor)
-
-        # add the autoregressive priors
+        # Autoregressive priors
         # p(z^1_i | z^1_{i-1}), p(z^2_i | z^2_{i-1}), ..., p(z^k_i | z^k_{i-1})
-        # the first prior is null
+
         # TODO: The shape should be (num_sources, num_latent_codes, num_latent_codes)
         # if the prior is conditioned to the class index, otherwise it should be (num_latent_codes, num_latent_codes)
-
-        factor = NewFactor(type="prior",
-                           value=torch.full(size=(self.num_sources,
-                                                  self.num_latent_codes,
-                                                  self.num_latent_codes),
-                                            fill_value=1/self.num_latent_codes))
-        self.factors.append(factor)
-
-        # add the posterior factors
-        # p(z^j_i | m_i)
-        factor = NewFactor(type="posterior",
-                           value=torch.full(size=(self.num_latent_codes,
-                                                  self.num_latent_codes,
-                                                  self.num_latent_codes),
-                                            fill_value=1/self.num_latent_codes))
-        self.factors.append(factor)
-
-        # add the likelihood factors, which don't depend on the indices
-        # p(m| z^1, z^2, ..., z^k)
-        factor = NewFactor(type="likelihood",
-                           value=torch.full(
-                               size=tuple(self.num_latent_codes for _ in range(
-                                   self.num_sources + 1)),
-                               fill_value=1/self.num_latent_codes
-                           ))
-        self.factors.append(factor)
+        self.factors.append(NewFactor(type="prior",
+                                      value=torch.full(size=(self.num_sources,
+                                                             self.num_latent_codes,
+                                                             self.num_latent_codes),
+                                                       fill_value=1/self.num_latent_codes)))
+        # Posterior factors P(z^j_i | m_i)
+        self.factors.append(NewFactor(type="posterior",
+                                      value=torch.full(size=(self.num_latent_codes,
+                                                             self.num_latent_codes,
+                                                             self.num_latent_codes),
+                                                       fill_value=1/self.num_latent_codes)))
+        # Likelihood factors P(m| z^1, z^2, ..., z^k)
+        self.factors.append(NewFactor(type="likelihood",
+                                      value=torch.full(
+                                          size=tuple(self.num_latent_codes for _ in range(
+                                              self.num_sources + 1)),
+                                          fill_value=1/self.num_latent_codes
+                                      )))
 
         ###########################
         # Initialize the messages #
@@ -195,27 +170,10 @@ class FactorGraph:
             num_latent_codes={self.num_latent_codes},
             factors={self.factors}"""
 
-    def _element_wise_prod_excluding_row(self, tensor1: torch.Tensor, tensor2: torch.Tensor, row: int) -> torch.Tensor:
-        """
-        Element-wise product of two tensors, excluding the given row
-        """
-        result = tensor1 * tensor2
-        result = torch.cat(
-            (result[:row], result[row+1:]), dim=0)
-        return result
-
     def _compute_sparse_likelihood(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         ll_coords, ll_data = self.likelihood.get_log_likelihood(
             self.mixture[idx])
         return ll_coords, ll_data
-
-    def _compute_dense_likelihood(self) -> torch.Tensor:
-        """
-        Returns the discrete likelihood K x K x ... K (m+1 times) matrix, where m is the number of sources and K is the number of latent codes.
-        This models the likelihood p(m|z^1, z^2, ..., z^m)
-        """
-
-        return self.likelihood.get_dense_log_likelihood()
 
     def _compute_dense_log_posterior(self, log_prior: torch.Tensor) -> torch.Tensor:
         """
@@ -295,8 +253,6 @@ class FactorGraph:
             log_priors: torch.Tensor,
         ):
 
-            # Inside the posterior computation, there are 2 priors, with shapes: [torch.Size([256, 256]), torch.Size([256, 256])]                          | 0/64 [00:00<?, ?it/s]
-            # Inside the posterior computation, there are 2 priors, with shapes: [torch.Size([1, 256]), torch.Size([1, 256])]
             log.debug(
                 f"Inside the posterior computation the priors shape is: {log_priors.shape}")
 
@@ -349,17 +305,16 @@ class FactorGraph:
         """
         Run the sum-product algorithm for the given number of iterations in order to compute the marginal distributions.
         """
+        # The priors are updated only at the start of the belief propagation
+        self._update_autoregressive_prior()
 
-        for it in tqdm(range(iterations), desc="Belief Propagation"):
+        # for it in tqdm(range(iterations), desc="Belief Propagation"):
+        for it in range(iterations):
             # NOTE: Brainstorming: https://chat.openai.com/share/b9eabf18-3d2d-475b-9b97-c080c9341661
-            # Computing the local factor values:
-            log.debug(
-                f"In order to debug, the shape of the variable-to-factor messages are {[message.shape for message in self.msg_vf.values()]}")
-            for factor in self.factors:
-                if factor.type == "prior":
-                    self._update_autoregressive_prior()
-                if factor.type == "posterior":
-                    self._update_posterior()
+
+            # The posterior is updated at each iteration
+            self._update_posterior()
+
             # Update all factor-to-variable messages
             for factor, message in self.msg_fv.items():
                 log.debug(f"Updating the message for factor {factor}")
@@ -407,7 +362,6 @@ class FactorGraph:
 
                     if factor.type == "likelihood" or factor.type == "posterior":
                         # TODO: I don't know if I can update the prior and the posterior in the same way.
-
                         stacked_updated_messages = torch.zeros(
                             size=(self.num_latent_codes, self.num_latent_codes, self.num_latent_codes))
 
@@ -475,40 +429,38 @@ class FactorGraph:
                 self.msg_vf[factor] = sum_incoming_messags
 
         # Compute the marginals for all the variables
-        for factor, message in self.msg_vf.items():
-            incoming_messages = [
-                message for fact in self.factors for message in self.msg_fv[fact]]
-
-            self.marginals = self.aggregate_messages(incoming_messages)
+        incoming_messages = [
+            message for fact in self.factors for message in self.msg_fv[fact]]
+        self.marginals = self.aggregate_messages(incoming_messages)
 
         log.debug(
             f"At the end of the belief propagation, the marginals are: {self.marginals}")
 
         return
 
-    def sample_sources(self) -> torch.Tensor:
-        # Sample mixture_length times from the marginal distribution of each variable
-        # Sample a source for each index
+    def sample_sources(self) -> List[torch.Tensor]:
         probs = torch.softmax(self.marginals, dim=-1)
-        source_1 = torch.multinomial(probs[0], 1)
-        source_2 = torch.multinomial(probs[1], 1)
-
-        return torch.cat((source_1, source_2), dim=0)
+        samples = []
+        for i in range(self.num_sources):
+            sample = torch.multinomial(probs[i], 1)
+            samples.append(sample)
+        return samples
 
     def separate(self) -> torch.Tensor:
-        # TODO: AUTOREGRESSION: sample one, insert it in the source tensor, update the messages with the new value, and then sample the next one
+        # Autoregressive sampling until the sources reach the mixture length
         sources = None
         for t in tqdm(range(self.mixture_length), desc="Separation"):
-            self.belief_propagation(iterations=10)
-            partial_sources = self.sample_sources().reshape(2, 1)
+            self.belief_propagation(iterations=50)
+            samples = self.sample_sources()
             if sources is None:
-                sources = partial_sources
+                sources = torch.stack(samples, dim=0)
             else:
-                sources = torch.cat((sources, partial_sources), dim=1)
-            log.debug(f"Partial sources at step {t} are: {partial_sources}")
-            print(f"Sources so far are: {sources}")
-            self.pasts[0] = sources[0].reshape(1, -1)
-            self.pasts[1] = sources[1].reshape(1, -1)
+                sources = torch.cat(
+                    (sources, torch.stack(samples, dim=0)), dim=1)
+            log.debug(f"Sampled sources at step {t} are: {samples}")
+            log.debug(f"Sources at step {t} are : {sources}")
+            self.pasts[0] = sources[0].view(1, -1)
+            self.pasts[1] = sources[1].view(1, -1)
 
         return sources
 
@@ -517,7 +469,6 @@ if __name__ == "__main__":
     #############
     # Main code #
     #############
-
     mixture = torch.tensor([210, 135, 8, 202, 135, 8, 56, 39, 63, 168, 149, 119, 70, 56, 137, 149, 93, 217, 217, 217, 8, 210, 66,
                             254, 26, 9, 168, 135, 210, 29, 26, 88, 222, 75, 210, 56, 56, 88, 4, 34, 80, 8, 56, 137, 75, 7, 41, 8, 56])
     # MIXTURE_LENGTH = 49
