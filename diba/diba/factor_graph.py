@@ -53,75 +53,6 @@ def _check_if_nan_or_inf(tensor: torch.Tensor) -> bool:
     return torch.isnan(tensor).any() or torch.isinf(tensor).any()
 
 
-class Variable:
-    _variables = {}
-
-    def __new__(cls, class_idx: Union[int, None], idx: int, mixture: bool = False):
-        key = (class_idx, idx, mixture)
-        if key in Variable._variables:
-            return Variable._variables[key]
-        else:
-            instance = super(Variable, cls).__new__(cls)
-            instance.class_idx = class_idx
-            instance.idx = idx
-            instance.mixture = mixture
-            Variable._variables[key] = instance
-            return instance
-
-    def __init__(self, class_idx: Union[int, None], idx: int, mixture: bool = False):
-        # Initialize only if it's a new instance
-        if not hasattr(self, 'initialized'):
-            self.neigh_factors = set()
-            self.outgoing_messages: Set[Message] = set()
-            self.incoming_messages: Set[Message] = set()
-            self.class_idx = class_idx
-            self.idx = idx
-            self.mixture = mixture
-
-            # TODO: do not hardcode this
-            self.marginal = torch.full((256,), (1 / 256))
-            self.initialized = True
-
-    def __hash__(self):
-        return hash((self.class_idx, self.idx, self.mixture))
-
-    def __repr__(self):
-        if self.mixture:
-            return f"m_{self.idx}"
-        return f"z^{self.class_idx}_{self.idx}"
-
-
-class NewVariable:
-    _variables = {}
-
-    def __new__(cls, class_idx: Union[int, None], value: torch.Tensor):
-        key = "mixture" if class_idx is None else class_idx
-        if key in NewVariable._variables:
-            return NewVariable._variables[key]
-        else:
-            instance = super(Variable, cls).__new__(cls)
-            instance.class_idx = class_idx
-            instance.value = value
-            NewVariable._variables[key] = instance
-            return instance
-
-    def __init__(self, class_idx: Union[int, None], value: torch.Tensor):
-        # Initialize only if it's a new instance
-        self.class_idx = class_idx
-        self.value = value
-        self.neigh_factors = set()
-        self.outgoing_messages: Set[Message] = set()
-        self.incoming_messages: Set[Message] = set()
-
-    def __hash__(self):
-        return hash((self.class_idx))
-
-    def __repr__(self):
-        if self.class_idx is None:
-            return f"m"
-        return f"z^{self.class_idx}"
-
-
 class NewFactor:
     _factors = {}
 
@@ -140,120 +71,12 @@ class NewFactor:
         # Initialize only if it's a new instance
         self.type = type
         self.value = value
-        self.incoming_messages: Set[Message] = set()
-        self.outgoing_messages: Set[Message] = set()
 
     def __hash__(self):
         return hash((self.type))
 
     def __repr__(self):
-        return f"NewFactor(type={self.type})"
-
-
-class Factor:
-    _connected_vars_instances = {}
-    _factors = {}
-
-    def __new__(cls, type: str, idx: int, connected_vars: List[Variable], value: torch.Tensor):
-        key = (type, idx, tuple(connected_vars))
-        if key in Factor._factors:
-            return Factor._factors[key]
-        else:
-            instance = super(Factor, cls).__new__(cls)
-            instance.type = type
-            instance.idx = idx
-            instance.connected_vars = connected_vars
-            instance.value = value
-            Factor._factors[key] = instance
-            return instance
-
-    def __init__(self, type: str, idx: int, connected_vars: List[Variable], value: torch.Tensor):
-        # Initialize only if it's a new instance
-        self.value = value
-        self.incoming_messages: Set[Message] = set()
-        self.outgoing_messages: Set[Message] = set()
-        self.initialized = True
-        self.connected_vars = connected_vars
-        self.type = type
-        self.idx = idx
-        self.marginals: List[torch.Tensor] = []
-
-    def __hash__(self):
-        return hash((self.type, self.idx, tuple(self.connected_vars)))
-
-    def __repr__(self):
-        return f"Factor(type={self.type}, idx={self.idx}, connected_vars={self.connected_vars})"
-
-
-class SparseFactor:
-    _connected_vars_instances = {}
-    _factors = {}
-
-    def __new__(cls, type: str, idx: int, connected_vars: List[Variable], value_coords: torch.Tensor, value_data: torch.Tensor):
-        key = (type, idx, tuple(connected_vars))
-        if key in SparseFactor._factors:
-            return SparseFactor._factors[key]
-        else:
-            instance = super(SparseFactor, cls).__new__(cls)
-            instance.type = type
-            instance.idx = idx
-            instance.connected_vars = connected_vars
-            instance.value_coords = value_coords
-            instance.value_data = value_data
-            SparseFactor._factors[key] = instance
-            return instance
-
-    def __init__(self, type: str, idx: int, connected_vars: List[Variable], value_coords: torch.Tensor, value_data: torch.Tensor):
-        # Initialize only if it's a new instance
-        if not hasattr(self, 'initialized'):
-            self.value_coords = value_coords
-            self.value_data = value_data
-            self.incoming_messages = set()
-            self.outgoing_messages = set()
-            self.initialized = True
-            self.connected_vars = connected_vars
-            self.type = type
-            self.idx = idx
-
-    def __hash__(self):
-        return hash((self.type, self.idx, tuple(self.connected_vars)))
-
-    def __eq__(self, other):
-        return isinstance(other, SparseFactor) and (
-            self.type, self.idx, tuple(self.connected_vars)) == (other.type, other.idx, tuple(other.connected_vars))
-
-    def __repr__(self):
-        return f"SparseFactor(type={self.type}, idx={self.idx}, connected_vars={self.connected_vars})"
-
-
-class Message:
-    _messages = {}
-
-    def __new__(cls, _from: Union[Factor, Variable, SparseFactor], _to: Union[Factor, Variable, SparseFactor], value: torch.Tensor):
-        key = (_from, _to)
-        if key in Message._messages:
-            return Message._messages[key]
-        else:
-            instance = super(Message, cls).__new__(cls)
-            instance._from = _from
-            instance._to = _to
-            instance.value = value
-            Message._messages[key] = instance
-            return instance
-
-    def __init__(self, _from: Union[Factor, Variable, SparseFactor], _to: Union[Factor, Variable, SparseFactor], value: torch.Tensor):
-        # Initialize only if it's a new instance
-        if not hasattr(self, 'initialized'):
-            self.initialized = True
-            self._from = _from
-            self._to = _to
-            self.value = value
-
-    def __hash__(self):
-        return hash((self._from, self._to))
-
-    def __repr__(self):
-        return f"Message(from={self._from}, to={self._to}, value_shape={self.value.shape})"
+        return f"NewFactor(type={self.type}, value_shape={self.value.shape})"
 
 
 class FactorGraph:
@@ -268,11 +91,11 @@ class FactorGraph:
         self.mixture = mixture  # 'm' in the equations
         self.mixture_length = len(mixture)  # 'n' in the equations
         self.num_latent_codes = 256  # 256 in the case of MNIST
-        self.variables: Set[Variable] = set()
+        # self.variables: Set[Variable] = set()
         # always None in the case of uncoditional priors
         self.pasts = [None for _ in range(self.num_sources)]
         self.likelihood = likelihood
-        self.marginals: List[torch.Tensor] = []
+        self.marginals: torch.Tensor = []
 
         log.debug(f"Length of the mixture is: {self.mixture_length}")
 
@@ -299,7 +122,7 @@ class FactorGraph:
         # Initialize the factors #
         ##########################
 
-        self.factors: List[Factor] = []
+        self.factors: List[NewFactor] = []
 
         # add the marginal distribution of the mixture
         # p(m_1), p(m_2), ..., p(m_n)
@@ -307,7 +130,8 @@ class FactorGraph:
                            value=torch.full(size=(1, self.num_latent_codes),
                                             fill_value=1.0 / self.num_latent_codes))
 
-        self.factors.append(factor)
+        # TODO: I don't know if I should add this factor
+        # self.factors.append(factor)
 
         # add the marginal distribution of the sources
         # p(z^j_1), p(z^j_2), ..., p(z^j_n)
@@ -315,7 +139,8 @@ class FactorGraph:
                            value=torch.full(size=(self.num_sources,
                                                   self.num_latent_codes),
                                             fill_value=1.0 / self.num_latent_codes))
-        self.factors.append(factor)
+        # TODO: I don't know if I should add this factor
+        # self.factors.append(factor)
 
         # add the autoregressive priors
         # p(z^1_i | z^1_{i-1}), p(z^2_i | z^2_{i-1}), ..., p(z^k_i | z^k_{i-1})
@@ -328,7 +153,6 @@ class FactorGraph:
                                                   self.num_latent_codes,
                                                   self.num_latent_codes),
                                             fill_value=1/self.num_latent_codes))
-
         self.factors.append(factor)
 
         # add the posterior factors
@@ -348,22 +172,20 @@ class FactorGraph:
                                    self.num_sources + 1)),
                                fill_value=1/self.num_latent_codes
                            ))
-
         self.factors.append(factor)
 
         ###########################
         # Initialize the messages #
         ###########################
 
-        self.msg_fv: Dict[Tuple[NewFactor, int], torch.Tensor] = {}
-        self.msg_vf: Dict[Tuple[int, NewFactor], torch.Tensor] = {}
+        self.msg_fv: Dict[NewFactor, torch.Tensor] = {}
+        self.msg_vf: Dict[NewFactor, torch.Tensor] = {}
 
         for factor in self.factors:
-            for class_idx in range(self.num_sources):
-                self.msg_fv[(factor, class_idx)] = torch.zeros(
-                    size=(factor.value.shape))
-                self.msg_vf[(class_idx, factor)] = torch.zeros(
-                    size=(factor.value.shape))
+            self.msg_fv[factor] = torch.zeros(
+                size=(factor.value.shape))
+            self.msg_vf[factor] = torch.zeros(
+                size=(factor.value.shape))
 
     def __repr__(self):
         return f"""FactorGraph(
@@ -421,17 +243,25 @@ class FactorGraph:
             factor for factor in self.factors if factor.type == "prior"][0]
         for class_idx in range(self.num_sources):
             class_prior: UnconditionedTransformerPrior = self.priors[class_idx]
-            past = self.pasts[class_idx]
             for i in range(self.mixture_length):
-                observed_mixture = self.mixture[i].unsqueeze(
-                    0).unsqueeze(0).to(torch.long)
-                log_priors, new_past = class_prior.get_logits(
-                    token_ids=observed_mixture,
-                    past_key_values=past)
-                self.pasts[class_idx] = new_past
-                prob_priors = torch.softmax(log_priors, dim=-1)
-                updated_factor_value = prob_priors.squeeze(0)
-                prior_factor.value[class_idx, i, :] = updated_factor_value
+                current_source = self.pasts[class_idx] if self.pasts[class_idx] is not None else class_prior.get_sos(
+                ).unsqueeze(0)
+                current_source = current_source.to(torch.long)
+
+                log.debug(
+                    f"During autoregressive prior update, the current source shape is {current_source.shape}")
+
+                # Log priors shape should be torch.Size([1, 256])
+                # Current source shape sould be torch.Size([1, n]) where n is the number of tokens samples so far
+                log_priors, _ = class_prior.get_logits(
+                    token_ids=current_source,
+                    past_key_values=None
+                )
+
+                probs = torch.softmax(log_priors, dim=-1)
+                log.debug(
+                    f"During autoregressive prior update, the prior shape is {prior_factor.value.shape} \n the probs shape is {probs.shape} \n the log_priors shape is {log_priors.shape}")
+                prior_factor.value[class_idx, i, :] = probs
 
     def _update_posterior(self):
         """
@@ -445,6 +275,9 @@ class FactorGraph:
 
         posterior_value = self._compute_dense_log_posterior(
             log_prior=prior_factor.value)
+
+        log.debug(
+            f"During the posterior update, the posterior value is: {posterior_value}")
 
         posterior_factor.value = posterior_value
 
@@ -470,11 +303,6 @@ class FactorGraph:
             log.debug(
                 f"Inside the posterior computation, nll_coords shape is {nll_coords.shape}, while nll_data shape is {nll_data.shape}")
 
-            # assert num_sources == nll_coords.shape[0], f"""
-            #     The number of sources is not the same as the number of likelihoods.
-            #     The number of sources is: {num_sources}
-            #     The number of likelihoods is: {nll_coords.shape[0]}
-            # """
             dense_log_likelihood = torch.sparse_coo_tensor(
                 nll_coords, nll_data, size=(256, 256)).to_dense()
 
@@ -490,28 +318,21 @@ class FactorGraph:
         return probs
 
     def aggregate_messages(self, messages, operation="sum"):
-        """Aggregates incoming messages into a variable via a summation to compute the marginals.
+        """Aggregates incoming messages into a variable via the specified operation.
 
         Args:
-            messages: A list of incoming messages, each with a different shape.
+            - messages: A list of incoming messages, each with a different shape.
+            - operation: The operation to use for aggregation (only "sum" is supported at the moment)
 
         Returns:
             A tensor containing the aggregated messages.
         """
 
         # TODO: I don't know if this keeps the semantic of the messages
-
         # Reshape the incoming messages to the same shape.
         messages: List[torch.Tensor] = torch.broadcast_tensors(*messages)
 
-        # log.debug(
-        #     f"After the aggregation, there are {len(messages)} messages, with shapes: {[message.shape for message in messages]}")
-
         messages: torch.Tensor = torch.stack(messages, dim=0)
-
-        # log.debug(
-        #     f"After the stacking, the aggregated message shape is: {messages.shape}"
-        # )
 
         if operation == "sum":
             # Sum the incoming messages.
@@ -532,38 +353,57 @@ class FactorGraph:
         for it in tqdm(range(iterations), desc="Belief Propagation"):
             # NOTE: Brainstorming: https://chat.openai.com/share/b9eabf18-3d2d-475b-9b97-c080c9341661
             # Computing the local factor values:
+            log.debug(
+                f"In order to debug, the shape of the variable-to-factor messages are {[message.shape for message in self.msg_vf.values()]}")
             for factor in self.factors:
                 if factor.type == "prior":
                     self._update_autoregressive_prior()
                 if factor.type == "posterior":
                     self._update_posterior()
             # Update all factor-to-variable messages
-            for (factor, class_idx), message in self.msg_fv.items():
-                # Unary factors
-                if factor.type == "mixture_marginal" or factor.type == "source_marginal":
-                    self.msg_fv[(factor, class_idx)] = torch.log(factor.value)
+            for factor, message in self.msg_fv.items():
+                log.debug(f"Updating the message for factor {factor}")
                 # Non unary factors
-                else:
-                    if factor.type == "prior":
+                if factor.type == "prior":
+                    log.debug(
+                        f"Factor {factor} has a value with shape {factor.value.shape}")
 
-                        log.debug(
-                            f"Factor {factor} has a value with shape {factor.value.shape}")
+                    # Note: msg_vf gets very small and so the exponentiation of it gets near to zero, so the result is 0, and the log of 0 is -inf
+                    updates_message_other_v = factor.value * torch.exp(
+                        self.msg_vf[factor]
+                    )
 
-                        other_v = 0 if class_idx == 1 else 1
-                        updates_message_other_v = factor.value[other_v, :, :] * torch.exp(
-                            self.msg_vf[(other_v, factor)][other_v, :, :]
-                        )
-                        updated_message = torch.log(
-                            updates_message_other_v)
+                    log.debug(f"""
+                    During the prior_factor-to-variable message update:
+                    The factor value is {factor.value}
+                    The incoming messages are {self.msg_vf[factor]}
+                    The exponentiated incoming messages are {torch.exp(self.msg_vf[factor])}""")
 
-                        log.debug(
-                            f"Updated message has shape {updated_message.shape}")
+                    updated_message = torch.log(
+                        updates_message_other_v + 1e-10)
 
-                        log.debug(
-                            f"Final updated message for {factor} is: {updated_message} with shape {updated_message.shape}")
+                    assert not _check_if_nan_or_inf(updated_message), f"""
+                    Assert error for factor {factor} during factor-to-variable message update
+                    The updated message contains NaN or Inf values
+                    Updated message before log operation: {updates_message_other_v}
+                    Updated message: {updated_message}
+                    """
 
-                        self.msg_fv[(factor, class_idx)
-                                    ] = updated_message
+                    log.debug(
+                        f"Final updated message for {factor} has shape {updated_message.shape}, where the original message had shape: {message.shape}")
+
+                    assert updated_message.shape == message.shape == factor.value.shape, f"""
+                    Assert error for factor {factor} during factor-to-variable message update
+                    The shapes between the original message, the updated message and the factor value are not compatible
+                    Original message shape: {message.shape}
+                    Updated message shape: {updated_message.shape}
+                    Factor value shape: {factor.value.shape}
+                    """
+
+                    self.msg_fv[factor] = updated_message
+
+                    log.debug(
+                        f"The message after the update has shape {self.msg_fv[factor].shape}")
 
                     if factor.type == "likelihood" or factor.type == "posterior":
                         # TODO: I don't know if I can update the prior and the posterior in the same way.
@@ -574,13 +414,16 @@ class FactorGraph:
                         # TODO: change this when you will deal with more than 2 sources
                         for i in range(self.num_latent_codes):
 
+                            log.debug(
+                                f"The message from variable to factor {factor} has shape {self.msg_vf[factor].shape}")
+
                             updated_message_z1 = factor.value[i, :, :] * torch.exp(
-                                self.msg_vf[(0, factor)][i, :, :] +
-                                self.msg_vf[(1, factor)][:, i, :]
+                                self.msg_vf[factor][i, :, :] +
+                                self.msg_vf[factor][:, i, :]
                             )
                             updated_message_z2 = factor.value[:, i, :] * torch.exp(
-                                self.msg_vf[(0, factor)][i, :, :] +
-                                self.msg_vf[(1, factor)][:, i, :]
+                                self.msg_vf[factor][i, :, :] +
+                                self.msg_vf[factor][:, i, :]
                             )
 
                             updated_message = torch.log(
@@ -588,77 +431,85 @@ class FactorGraph:
 
                             stacked_updated_messages[i, :, :] = updated_message
 
-                            log.debug(
-                                f"Final updated message for likelihood factor is: {updated_message} with shape {updated_message.shape}")
+                        assert not _check_if_nan_or_inf(updated_message), f"""
+                        Assert error for factor {factor} during factor-to-variable message update
+                        The updated message contains NaN or Inf values
+                        Updated message before log operation: {updates_message_other_v}
+                        Updated message: {updated_message}
+                        """
 
-                        self.msg_fv[(factor, class_idx)
-                                    ] = stacked_updated_messages
+                        assert stacked_updated_messages.shape == message.shape == factor.value.shape, f"""
+                        Assert error for factor {factor} during factor-to-variable message update
+                        The shapes between the original message, the updated message and the factor value are not compatible
+                        Original message shape: {message.shape}
+                        Updated message shape: {updated_message.shape}
+                        Factor value shape: {factor.value.shape}
+                        """
 
+                        self.msg_fv[factor] = stacked_updated_messages
+
+                        log.debug(
+                            f"Likelihood message after update has shape {self.msg_fv[factor].shape}, the original message had shape {message.shape}")
             log.debug(f"Updated unary factor-to-variable messages")
 
             # Update all variable-to-factor messages
             # NOTE: I just have to take the sum of the incoming messages, except for the one that is coming from the factor itself
-            for (class_idx, factor), message in self.msg_vf.items():
+            for factor, message in self.msg_vf.items():
                 incoming_messages = [
-                    message for fact in self.factors for message in self.msg_fv[(fact, class_idx)] if f != factor]
+                    message for fact in self.factors for message in self.msg_fv[fact] if fact != factor]
+
+                log.debug(
+                    f"There are {len(incoming_messages)} incoming messages (excluding the one from the factor {factor}), with shapes {set(message.shape for message in incoming_messages)}")
 
                 sum_incoming_messags = self.aggregate_messages(
                     incoming_messages)
 
                 log.debug(
-                    f"There are {len(incoming_messages)} incoming messages for the variable {class_idx} (excluding the one from the factor {factor})")
+                    f"There are {len(incoming_messages)} incoming messages (excluding the one from the factor {factor})")
                 log.debug(
-                    f"The shapes of the messages are {[message.shape for message in incoming_messages]}")
+                    f"The shapes of the messages are {set(message.shape for message in incoming_messages)}")
+                # TODO: there is an error here since the shape is always (256,256), while it should be the shape of the factor value
                 log.debug(
                     f"The shape of sum_incoming_messags is {sum_incoming_messags.shape}")
 
-                self.msg_vf[(class_idx, factor)] = sum_incoming_messags
+                self.msg_vf[factor] = sum_incoming_messags
 
         # Compute the marginals for all the variables
-        for (class_idx, factor), message in self.msg_vf.items():
+        for factor, message in self.msg_vf.items():
             incoming_messages = [
-                message for fact in self.factors for message in self.msg_fv[(fact, class_idx)]]
+                message for fact in self.factors for message in self.msg_fv[fact]]
 
-            self.marginals[class_idx] = self.aggregate_messages(
-                incoming_messages)
+            self.marginals = self.aggregate_messages(incoming_messages)
 
         log.debug(
             f"At the end of the belief propagation, the marginals are: {self.marginals}")
 
-        raise NotImplementedError("This is not implemented yet")
         return
 
     def sample_sources(self) -> torch.Tensor:
         # Sample mixture_length times from the marginal distribution of each variable
-        pass
+        # Sample a source for each index
+        probs = torch.softmax(self.marginals, dim=-1)
+        source_1 = torch.multinomial(probs[0], 1)
+        source_2 = torch.multinomial(probs[1], 1)
 
-        # sources = torch.zeros(self.num_sources, self.mixture_length)
-        # for variable in self.variables:
-        #     if variable.class_idx is not None:
-        #         logits = variable.marginal[0]
-
-        #         # Create a Gumbel noise tensor
-        #         gumbel_noise = torch.empty_like(logits).uniform_()
-
-        #         # Add the Gumbel noise tensor to the logits tensor
-        #         logits_with_noise = logits + gumbel_noise
-
-        #         # Take the softmax of the resulting tensor
-        #         probs = torch.softmax(logits_with_noise, dim=-1)
-
-        #         # Sample from the tensor of probabilities
-        #         samples = torch.multinomial(probs, num_samples=1)
-
-        #         sample = samples[0]
-
-        #         log.debug(f"Sample for variable {variable} is: {sample}")
-
-        #         sources[variable.class_idx, variable.idx] = sample
-        # return torch.tensor(sources, dtype=torch.long)
+        return torch.cat((source_1, source_2), dim=0)
 
     def separate(self) -> torch.Tensor:
-        self.belief_propagation(iterations=20)
-        sources = self.sample_sources()
+        # TODO: AUTOREGRESSION: sample one, insert it in the source tensor, update the messages with the new value, and then sample the next one
+        sources = None
+        for t in tqdm(range(self.mixture_length), desc="Separation"):
+            self.belief_propagation(iterations=10)
+            partial_sources = self.sample_sources().reshape(2, 1)
+            if sources is None:
+                sources = partial_sources
+            else:
+                sources = torch.cat((sources, partial_sources), dim=1)
+            log.debug(f"Partial sources at step {t} are: {partial_sources}")
+            print(f"Sources so far are: {sources}")
+            self.pasts[0] = sources[0].reshape(1, -1)
+            self.pasts[1] = sources[1].reshape(1, -1)
+
         return sources
 
 
