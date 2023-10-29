@@ -1,6 +1,6 @@
 import functools
 from pathlib import Path
-from typing import Any, Tuple
+from typing import Any, Tuple, Union
 
 import torch
 from hydra.core.config_store import ConfigStore
@@ -60,6 +60,8 @@ class DenseLikelihood(Likelihood):
         coords = torch.nonzero(mixture_slice).transpose(0, 1)
         return coords, torch.log(mixture_slice[coords[0], coords[1]])
 
-    def get_dense_log_likelihood(self, token_idx: int) -> torch.Tensor:
+    def get_dense_log_likelihood(self, token_idx: Union[int, None]) -> torch.Tensor:
+        if token_idx is None:
+            return self.sum
         mixture_slice = self.sum[:, :, token_idx]
         return torch.log(mixture_slice)

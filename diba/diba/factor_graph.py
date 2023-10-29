@@ -32,7 +32,7 @@ Note: $\chi_f$ are the variables that are involved for the factor $f$
 """
 
 log = logging.getLogger("logger")
-DEBUG = False
+DEBUG = True
 
 if DEBUG:
     logging.basicConfig(filename='factor_graph.log', level=logging.DEBUG,
@@ -62,25 +62,25 @@ def _check_if_nan_or_inf(tensor: torch.Tensor) -> bool:
 class Variable:
     _variables = {}
 
-    def __new__(cls, classIdx: Union[int, None], idx: int, mixture: bool = False):
-        key = (classIdx, idx, mixture)
+    def __new__(cls, class_idx: Union[int, None], idx: int, mixture: bool = False):
+        key = (class_idx, idx, mixture)
         if key in Variable._variables:
             return Variable._variables[key]
         else:
             instance = super(Variable, cls).__new__(cls)
-            instance.classIdx = classIdx
+            instance.class_idx = class_idx
             instance.idx = idx
             instance.mixture = mixture
             Variable._variables[key] = instance
             return instance
 
-    def __init__(self, classIdx: Union[int, None], idx: int, mixture: bool = False):
+    def __init__(self, class_idx: Union[int, None], idx: int, mixture: bool = False):
         # Initialize only if it's a new instance
         if not hasattr(self, 'initialized'):
             self.neigh_factors = set()
             self.outgoing_messages: Set[Message] = set()
             self.incoming_messages: Set[Message] = set()
-            self.classIdx = classIdx
+            self.class_idx = class_idx
             self.idx = idx
             self.mixture = mixture
 
@@ -89,12 +89,71 @@ class Variable:
             self.initialized = True
 
     def __hash__(self):
-        return hash((self.classIdx, self.idx, self.mixture))
+        return hash((self.class_idx, self.idx, self.mixture))
 
     def __repr__(self):
         if self.mixture:
             return f"m_{self.idx}"
-        return f"z^{self.classIdx}_{self.idx}"
+        return f"z^{self.class_idx}_{self.idx}"
+
+
+class NewVariable:
+    _variables = {}
+
+    def __new__(cls, class_idx: Union[int, None], value: torch.Tensor):
+        key = "mixture" if class_idx is None else class_idx
+        if key in NewVariable._variables:
+            return NewVariable._variables[key]
+        else:
+            instance = super(Variable, cls).__new__(cls)
+            instance.class_idx = class_idx
+            instance.value = value
+            NewVariable._variables[key] = instance
+            return instance
+
+    def __init__(self, class_idx: Union[int, None], value: torch.Tensor):
+        # Initialize only if it's a new instance
+        self.class_idx = class_idx
+        self.value = value
+        self.neigh_factors = set()
+        self.outgoing_messages: Set[Message] = set()
+        self.incoming_messages: Set[Message] = set()
+
+    def __hash__(self):
+        return hash((self.class_idx))
+
+    def __repr__(self):
+        if self.class_idx is None:
+            return f"m"
+        return f"z^{self.class_idx}"
+
+
+class NewFactor:
+    _factors = {}
+
+    def __new__(cls, type: str, value: torch.Tensor):
+        key = (type, value)
+        if key in NewFactor._factors:
+            return NewFactor._factors[key]
+        else:
+            instance = super(NewFactor, cls).__new__(cls)
+            instance.type = type
+            instance.value = value
+            NewFactor._factors[key] = instance
+            return instance
+
+    def __init__(self, type: str, value: torch.Tensor):
+        # Initialize only if it's a new instance
+        self.type = type
+        self.value = value
+        self.incoming_messages: Set[Message] = set()
+        self.outgoing_messages: Set[Message] = set()
+
+    def __hash__(self):
+        return hash((self.type))
+
+    def __repr__(self):
+        return f"NewFactor(type={self.type})"
 
 
 class Factor:
@@ -249,123 +308,69 @@ class FactorGraph:
 
         # add the marginal distribution of the mixture
         # p(m_1), p(m_2), ..., p(m_n)
-        for i in range(self.mixture_length):
-            factor = Factor("mixture_marginal",
-                            idx=i,
-                            connected_vars=[
-                                Variable(classIdx=None, idx=i, mixture=True),
-                            ],
-                            value=torch.full((self.num_latent_codes,), 1.0 / self.num_latent_codes))
+        factor = NewFactor(type="mixture_marginal",
+                           value=torch.full(size=(1, self.num_latent_codes),
+                                            fill_value=1.0 / self.num_latent_codes))
 
-            self.factors.append(factor)
-            self.variables = self.variables.union(set(factor.connected_vars))
+        self.factors.append(factor)
 
         # add the marginal distribution of the sources
         # p(z^j_1), p(z^j_2), ..., p(z^j_n)
-        for j in range(self.num_sources):
-            for i in range(self.mixture_length):
-                factor = Factor(type="source_marginal",
-                                idx=i,
-                                connected_vars=[
-                                    Variable(classIdx=j, idx=i),
-                                ],
-                                value=torch.full((self.num_latent_codes,), 1.0 / self.num_latent_codes))
-                self.factors.append(factor)
-                self.variables = self.variables.union(
-                    set(factor.connected_vars))
+        factor = NewFactor(type="source_marginal",
+                           value=torch.full(size=(self.num_sources,
+                                                  self.num_latent_codes),
+                                            fill_value=1.0 / self.num_latent_codes))
+        self.factors.append(factor)
+
         # add the autoregressive priors
         # p(z^1_i | z^1_{i-1}), p(z^2_i | z^2_{i-1}), ..., p(z^k_i | z^k_{i-1})
-        for j in range(self.num_sources):
-            for i in range(self.mixture_length):
-                # the first prior is null
-                if i > 0:
-                    factor = Factor(type="prior",
-                                    idx=i,
-                                    connected_vars=[Variable(classIdx=j, idx=i),
-                                                    Variable(classIdx=j, idx=i-1)],
-                                    value=torch.full(size=(self.num_latent_codes, self.num_latent_codes), fill_value=1/self.num_latent_codes))
+        # the first prior is null
+        factor = NewFactor(type="prior",
+                           value=torch.full(size=(self.num_sources,
+                                                  self.num_latent_codes,
+                                                  self.num_latent_codes),
+                                            fill_value=1/self.num_latent_codes))
 
-                self.factors.append(factor)
-                self.variables = self.variables.union(
-                    set(factor.connected_vars))
+        self.factors.append(factor)
 
         # add the posterior factors
         # p(z^j_i | m_i)
-        for j in range(self.num_sources):
-            for i in range(self.mixture_length):
-                factor = Factor(type="posterior",
-                                idx=i,
-                                connected_vars=[
-                                    Variable(classIdx=j, idx=i),
-                                    Variable(classIdx=None, idx=i, mixture=True)],
-                                value=torch.full(size=(self.num_latent_codes, self.num_latent_codes), fill_value=1/self.num_latent_codes))
-                self.factors.append(factor)
-                self.variables = self.variables.union(
-                    set(factor.connected_vars))
+        factor = NewFactor(type="posterior",
+                           value=torch.full(size=(self.num_sources,
+                                                  self.num_latent_codes,
+                                                  self.num_latent_codes),
+                                            fill_value=1/self.num_latent_codes))
+        self.factors.append(factor)
 
         # add the likelihood factors, which don't depend on the indices
         # p(m| z^1, z^2, ..., z^k)
-        for i in range(self.mixture_length):
-            factor = SparseFactor(type="likelihood",
-                                  idx=i,
-                                  connected_vars=[
-                                      Variable(classIdx=None,
-                                               idx=i, mixture=True),
-                                      *[Variable(classIdx=j, idx=i) for j in range(self.num_sources)]],
-                                  value_coords=self._compute_sparse_likelihood(
-                                      idx=i)[0],
-                                  value_data=self._compute_sparse_likelihood(
-                                      idx=i)[1])
+        factor = NewFactor(type="likelihood",
+                           value=torch.full(
+                               size=tuple(self.num_latent_codes for _ in range(
+                                   self.num_sources + 1)),
+                               fill_value=1/self.num_latent_codes
+                           ))
 
-            self.factors.append(factor)
-
-        self.variables = self.variables.union(
-            set(factor.connected_vars))
-
-        assert self.variables == set(Variable._variables.values()), f"""
-            The variables in the factor graph are not the same as the ones in the Variable class.
-            The variables in the factor graph are: {self.variables}
-            The variables in the Variable class are: {Variable._variables.values()}
-        """
+        self.factors.append(factor)
 
         ###########################
         # Initialize the messages #
         ###########################
 
+        self.msg_fv: Dict[Tuple[NewFactor, int], torch.Tensor] = {}
+        self.msg_vf: Dict[Tuple[int, NewFactor], torch.Tensor] = {}
+
         for factor in self.factors:
-
-            for var in factor.connected_vars:
-                if factor.type == "likelihood":
-                    message_shape = tuple(
-                        self.num_latent_codes for _ in range(self.num_sources + 1))
-                else:
-                    message_shape = factor.value.shape
-                message_in = Message(
-                    _from=factor, _to=var, value=torch.zeros(message_shape))
-                message_out = Message(
-                    _from=var, _to=factor, value=torch.zeros(message_shape))
-
-                var.incoming_messages.add(message_in)
-                var.outgoing_messages.add(message_out)
-                var.neigh_factors.add(factor)
-
-                factor.incoming_messages.add(message_out)
-                factor.outgoing_messages.add(message_in)
-
-        total_connected_vars = set([
-            var for fac in self.factors for var in fac.connected_vars])
-
-        assert total_connected_vars == set(self.variables), f"""
-            The variables in the factor graph are not the same as the ones in the Variable class.
-            The variables in the factor graph are: {total_connected_vars}
-            The variables in the Variable class are: {set(self.variables)}
-        """
+            for class_idx in range(self.num_sources):
+                self.msg_fv[(factor, class_idx)] = torch.zeros(
+                    size=(factor.value.shape))
+                self.msg_vf[(class_idx, factor)] = torch.zeros(
+                    size=(factor.value.shape))
 
     def __repr__(self):
         return f"""FactorGraph(
             num_sources={self.num_sources},
             mixture={self.mixture},
-            variables={self.variables},
             mixture_length={self.mixture_length}, 
             num_latent_codes={self.num_latent_codes},
             factors={self.factors}"""
@@ -383,6 +388,26 @@ class FactorGraph:
         ll_coords, ll_data = self.likelihood.get_log_likelihood(
             self.mixture[idx])
         return ll_coords, ll_data
+
+    def _compute_dense_likelihood(self) -> torch.Tensor:
+        """
+        Returns the discrete likelihood K x K x ... K (m+1 times) matrix, where m is the number of sources and K is the number of latent codes.
+        This models the likelihood p(m|z^1, z^2, ..., z^m)
+        """
+        return self.likelihood.get_dense_log_likelihood()
+
+    def _compute_dense_log_posterior(self, prior: torch.Tensor) -> torch.Tensor:
+        """
+        Returns the discrete posterior K x K x ... K (m times) matrix, where m is the number of sources and K is the number of latent codes.
+        This models the posterior p(z^i| m) for all the is.
+        """
+        return prior + self._compute_dense_likelihood()
+
+    def _compute_autoregressive_prior(self):
+        """
+        Compute the autoregressive prior p(z^j_i | z^j_{i-1}) for all the j and i.
+        """
+        pass
 
     def _compute_posterior(self, ll_data: torch.Tensor, ll_coords: torch.Tensor, priors: torch.Tensor, idx: int) -> torch.Tensor:
 
@@ -410,40 +435,11 @@ class FactorGraph:
 
             return log_priors + dense_log_likelihood
 
-            return nll_data + torch.sum(torch.stack([log_priors[i][:, nll_coords[i]] for i in range(num_sources)], dim=0), dim=0)
-
         posterior = _compute_log_posterior(
             nll_data=ll_data,
             nll_coords=ll_coords,
             log_priors=priors,
         )
-
-        # num_tokens = self.likelihood.get_tokens_count()  # 256 in the case of MNIST
-
-        # # Convert to shape (num samples, num_tokens*num_tokens)
-        # coords0, coords1 = ll_coords
-        # num_samples, _ = posterior.shape
-        # logits = torch.full(size=(num_samples, num_tokens ** 2),
-        #                     fill_value=np.log(1e-16), device=torch.device("cpu"))
-
-        # log.debug(
-        #     f"Logits shape in the posterior computation is: {logits.shape}, while posterior shape is: {posterior.shape}")
-
-        # logits.index_copy_(-1, coords0 * num_tokens +
-        #                    coords1, posterior)
-
-        # log.debug(
-        #     f"Logits shape in the posterior computation after the index copy is: {logits.shape}, while posterior shape is: {posterior.shape}")
-
-        # # Consider only the logits for the current token
-        # logits = logits[idx, :]
-
-        # log.debug(
-        #     f"Final Logits shape in the posterior computation is: {logits.shape}")
-
-        # probs = torch.softmax(logits, dim=-1).unsqueeze(0)
-
-        # probs = probs.reshape(num_tokens, num_tokens)
         probs = torch.softmax(posterior, dim=-1)
 
         return probs
@@ -484,29 +480,76 @@ class FactorGraph:
         """
 
         for it in tqdm(range(iterations), desc="Belief Propagation"):
-            # Update all unary factor-to-variable messages
-            for variable in self.variables:
-                for incoming_message in variable.incoming_messages:
-                    factor = incoming_message._from
-                    if factor.type == "mixture_marginal" or factor.type == "source_marginal":
-                        incoming_message.value = torch.log(factor.value)
-                        # incoming_message.value -= torch.mean(
-                        #     incoming_message.value)
+            # Update all factor-to-variable messages
+            for (factor, class_idx), message in self.msg_fv.items():
+                # Unary factors
+                if factor.type == "mixture_marginal" or factor.type == "source_marginal":
+                    self.msg_fv[(factor, class_idx)] = torch.log(factor.value)
+                # Non unary factors
+                else:
+                    if factor.type == "prior" or factor.type == "posterior":
+                        # I don't know if I can update the prior and the posterior in the same way.
+                        # I think the code for the prior is correct btw
 
                         log.debug(
-                            f"Updated message for unary factor {factor}. The message {incoming_message} is: {incoming_message.value} with shape {incoming_message.value.shape}"
+                            f"Factor {factor} has a value with shape {factor.value.shape}")
+
+                        other_v = 0 if class_idx == 1 else 1
+                        updates_message_other_v = factor.value[other_v, :, :] * torch.exp(
+                            self.msg_vf[(other_v, factor)][other_v, :, :]
                         )
+                        updated_message = torch.log(
+                            updates_message_other_v)
+
+                        log.debug(
+                            f"Updated message has shape {updated_message.shape}")
+
+                        log.debug(
+                            f"Final updated message for {factor} is: {updated_message} with shape {updated_message.shape}")
+
+                        self.msg_fv[(factor, class_idx)
+                                    ] = updated_message
+
+                    if factor.type == "likelihood":
+                        # You may remove this loop
+                        stacked_updated_messages = torch.zeros(
+                            size=(self.num_latent_codes, self.num_latent_codes, self.num_latent_codes))
+                        for i in range(self.num_latent_codes):
+
+                            updated_message_z1 = factor.value[i, :, :] * torch.exp(
+                                self.msg_vf[(0, factor)][i, :, :] +
+                                self.msg_vf[(1, factor)][:, i, :]
+                            )
+                            updated_message_z2 = factor.value[:, i, :] * torch.exp(
+                                self.msg_vf[(0, factor)][i, :, :] +
+                                self.msg_vf[(1, factor)][:, i, :]
+                            )
+
+                            updated_message = torch.log(
+                                updated_message_z1 + updated_message_z2)
+
+                            stacked_updated_messages[i, :, :] = updated_message
+
+                            log.debug(
+                                f"Final updated message for likelihood factor is: {updated_message} with shape {updated_message.shape}")
+
+                        self.msg_fv[(factor, class_idx)
+                                    ] = stacked_updated_messages
+
+            log.debug(f"Updated unary factor-to-variable messages")
+            raise Exception("STOPPP")
 
             # Update all factor-to-variable messages
+
             non_unary_factors = [
                 fac for fac in self.factors if not (fac.type == "mixture_marginal" or fac.type == "source_marginal")]
             for factor in non_unary_factors:
                 if factor.type == "prior":
                     for fac_var in factor.connected_vars:
                         # NOTE: in the case of uncoditional priors, the past is always None
-                        class_prior: UnconditionedTransformerPrior = self.priors[fac_var.classIdx]
+                        class_prior: UnconditionedTransformerPrior = self.priors[fac_var.class_idx]
 
-                        past = self.pasts[fac_var.classIdx]
+                        past = self.pasts[fac_var.class_idx]
 
                         log.debug(f"Factor value idx is: {fac_var.idx}")
                         log.debug(
@@ -530,7 +573,7 @@ class FactorGraph:
                         log.debug(
                             f"Log priors after normalization for {fac_var} are: {log_priors} with shape {log_priors.shape}")
 
-                        self.pasts[fac_var.classIdx] = new_past
+                        self.pasts[fac_var.class_idx] = new_past
 
                         prob_priors = torch.softmax(log_priors, dim=-1)
 
@@ -540,7 +583,7 @@ class FactorGraph:
                             updated_factor_value), f"The updated factor value for {factor} value is nan during autoregressive prior computation"
 
                         factor.value[:,
-                                     fac_var.classIdx] = updated_factor_value
+                                     fac_var.class_idx] = updated_factor_value
 
                 if factor.type == "likelihood":
                     # Compute the likelihood
@@ -717,7 +760,7 @@ class FactorGraph:
     def sample_sources(self) -> torch.Tensor:
         sources = torch.zeros(self.num_sources, self.mixture_length)
         for variable in self.variables:
-            if variable.classIdx is not None:
+            if variable.class_idx is not None:
                 logits = variable.marginal[0]
 
                 # Create a Gumbel noise tensor
@@ -736,7 +779,7 @@ class FactorGraph:
 
                 log.debug(f"Sample for variable {variable} is: {sample}")
 
-                sources[variable.classIdx, variable.idx] = sample
+                sources[variable.class_idx, variable.idx] = sample
         return torch.tensor(sources, dtype=torch.long)
 
     def separate(self) -> torch.Tensor:
@@ -746,8 +789,8 @@ class FactorGraph:
 
 
 def _test_build_pattern():
-    var1 = Variable(classIdx=0, idx=0)
-    var2 = Variable(classIdx=0, idx=0)
+    var1 = Variable(class_idx=0, idx=0)
+    var2 = Variable(class_idx=0, idx=0)
 
     assert var1 == var2, f"{var1} is not equal to {var2}"
 
@@ -771,7 +814,7 @@ def _test_build_pattern():
     assert message1 == message2, f"{message1} is not equal to {message2}"
 
     tricky_message_1 = Message(_from=fac1, _to=Variable(
-        classIdx=0, idx=0), value=torch.zeros((1, 2)))
+        class_idx=0, idx=0), value=torch.zeros((1, 2)))
 
     assert tricky_message_1 == message1, f"{tricky_message_1} is not equal to {message1}"
 
