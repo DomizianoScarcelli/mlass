@@ -88,8 +88,6 @@ def select_closest_to_mixture(
 
     rec_error = ((gt_mixture - (geni1 + geni2) * 0.5) ** 2).sum([1, 2, 3])
     sel = rec_error.argmin()
-
-    sel = 0  # TODO: just for debug
     return (geni1[sel], geni2[sel]), (gen1_o[sel], gen2_o[sel]), sel
 
 
@@ -184,9 +182,9 @@ class EvaluateSeparationConfig:
 
     latent_length: int = MISSING
     vocab_size: int = MISSING
-    # batch_size: int = 64
+    batch_size: int = 64
     # TODO: change it back to 64
-    batch_size: int = 4
+    # batch_size: int = 1
     class_conditioned: bool = False
     num_workers: int = mp.cpu_count() - 1
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
