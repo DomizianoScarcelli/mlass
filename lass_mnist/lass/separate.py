@@ -76,8 +76,17 @@ def select_closest_to_mixture(
     geni1 = vqvae.decode_latents(gen1_o).detach().clone()
     geni2 = vqvae.decode_latents(gen2_o).detach().clone()
 
+    # Rec error shape is torch.Size([1])
     rec_error = ((gt_mixture - (geni1 + geni2) * 0.5) ** 2).sum([1, 2, 3])
+    # print(f"Rec error shape is {rec_error.shape}")
     sel = rec_error.argmin()
+
+    # print(f"Selected: {sel}")
+    # print(f"gen1_o.shape: {gen1_o.shape}")
+    # print(f"gen2_o.shape: {gen2_o.shape}")
+    # print(f"geni1.shape: {geni1.shape}")
+    # print(f"geni2.shape: {geni2.shape}")
+
     return (geni1[sel], geni2[sel]), (gen1_o[sel], gen2_o[sel]), sel
 
 
@@ -173,8 +182,8 @@ class EvaluateSeparationConfig:
 
     latent_length: int = MISSING
     vocab_size: int = MISSING
-    # batch_size: int = 64
-    batch_size: int = 2
+    batch_size: int = 64
+    # batch_size: int = 2
     class_conditioned: bool = False
     num_workers: int = mp.cpu_count() - 1
     device: str = "cuda" if torch.cuda.is_available() else "cpu"

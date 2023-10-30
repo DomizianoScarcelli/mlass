@@ -109,8 +109,8 @@ def generate_samples(
 
     _, z_e_x_mixture, _ = model(gtm)
     codes_mixture = model.codeBook(z_e_x_mixture)
-    # codes_mixture = codes_mixture.view(
-    #     batch_size, latent_length ** 2).tolist()  # (B, H**2)
+    codes_mixture = codes_mixture.view(
+        batch_size, latent_length ** 2).tolist()  # (B, H**2)
 
     label0, label1 = bos
     p0 = UnconditionedTransformerPrior(transformer=transformer, sos=label0)
@@ -121,8 +121,8 @@ def generate_samples(
     gen1ims, gen2ims = [], []
     gen1lats, gen2lats = [], []
 
-    for mixture in tqdm.tqdm(codes_mixture, desc=f"Separating images"):
-        mixture = mixture.view(-1)
+    for bi in tqdm.tqdm(range(batch_size), desc="separating"):
+        mixture = torch.tensor(codes_mixture[bi])
 
         factor_graph = FactorGraph(
             num_sources=2, mixture=mixture, likelihood=likelihood)
@@ -133,7 +133,7 @@ def generate_samples(
             vqvae=model,
             gen1=z0.reshape(-1, latent_length, latent_length),
             gen2=z1.reshape(-1, latent_length, latent_length),
-            gt_mixture=gtm,
+            gt_mixture=gtm[bi:bi+1],
         )
 
         gen1ims.append(x0)
@@ -184,7 +184,7 @@ class EvaluateSeparationConfig:
     vocab_size: int = MISSING
     # batch_size: int = 64
     # TODO: change it back to 64
-    batch_size: int = 2
+    batch_size: int = 1
     class_conditioned: bool = False
     num_workers: int = mp.cpu_count() - 1
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
