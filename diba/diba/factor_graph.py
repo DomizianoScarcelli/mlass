@@ -143,11 +143,7 @@ class FactorGraph:
                                                        fill_value=1/self.num_latent_codes)))
         # Likelihood factors P(m| z^1, z^2, ..., z^k)
         self.factors.append(NewFactor(type="likelihood",
-                                      value=torch.full(
-                                          size=tuple(self.num_latent_codes for _ in range(
-                                              self.num_sources + 1)),
-                                          fill_value=1/self.num_latent_codes
-                                      )))
+                                      value=self.likelihood.get_dense_log_likelihood()))
 
         ###########################
         # Initialize the messages #
@@ -235,6 +231,9 @@ class FactorGraph:
             log_prior=prior_factor.value)
 
         log.debug(
+            f"Posterior number of non-zero elements: {posterior_value.nonzero().shape[0]}, while total elements are: {posterior_value.numel()}, with a sparse percentage of {posterior_value.nonzero().shape[0]/posterior_value.numel()}")
+
+        log.debug(
             f"During the posterior update, the posterior value is: {posterior_value}")
 
         posterior_factor.value = posterior_value
@@ -262,7 +261,9 @@ class FactorGraph:
             dense_log_likelihood = torch.sparse_coo_tensor(
                 nll_coords, nll_data, size=(256, 256)).to_dense()
 
-            return log_priors + dense_log_likelihood
+            posterior = log_priors + dense_log_likelihood
+
+            return posterior
 
         posterior = _compute_log_posterior(
             nll_data=ll_data,
@@ -307,14 +308,11 @@ class FactorGraph:
         """
         # The priors are updated only at the start of the belief propagation
         self._update_autoregressive_prior()
+        self._update_posterior()
 
         # for it in tqdm(range(iterations), desc="Belief Propagation"):
         for it in range(iterations):
             # NOTE: Brainstorming: https://chat.openai.com/share/b9eabf18-3d2d-475b-9b97-c080c9341661
-
-            # The posterior is updated at each iteration
-            self._update_posterior()
-
             # Update all factor-to-variable messages
             for factor, message in self.msg_fv.items():
                 log.debug(f"Updating the message for factor {factor}")
@@ -360,7 +358,7 @@ class FactorGraph:
                     log.debug(
                         f"The message after the update has shape {self.msg_fv[factor].shape}")
 
-                    if factor.type == "likelihood" or factor.type == "posterior":
+                    if factor.type == "posterior" or factor.type == "likelihood":
                         # TODO: I don't know if I can update the prior and the posterior in the same way.
                         stacked_updated_messages = torch.zeros(
                             size=(self.num_latent_codes, self.num_latent_codes, self.num_latent_codes))
@@ -440,6 +438,7 @@ class FactorGraph:
 
     def sample_sources(self) -> List[torch.Tensor]:
         probs = torch.softmax(self.marginals, dim=-1)
+        # top_k_probs = torch.topk(probs, k=10, dim=-1).values
         samples = []
         for i in range(self.num_sources):
             sample = torch.multinomial(probs[i], 1)
