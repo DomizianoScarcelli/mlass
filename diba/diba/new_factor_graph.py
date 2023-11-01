@@ -1,6 +1,5 @@
-from enum import Enum
 import time
-from typing import Dict, List, NamedTuple, Set, Tuple, Union
+from typing import Dict, List, Set, Tuple, Union
 import torch
 from tqdm import tqdm
 from diba.diba.utils import normalize_logits
@@ -53,61 +52,6 @@ def timeit(func):
 def _check_if_nan_or_inf(tensor: torch.Tensor) -> bool:
     return torch.isnan(tensor).any() or torch.isinf(tensor).any()
 
-#########################################
-# Labelled Tensor
-#########################################
-
-
-class LabeledTensor(NamedTuple):
-    # Source: https://jessicastringham.net/2019/01/09/sum-product-message-passing/
-    tensor: torch.Tensor
-    axes_labels: Tuple[str, ...]
-
-
-def name_to_axis_mapping(labeled_tensor: LabeledTensor):
-    return {
-        name: axis
-        for axis, name in enumerate(labeled_tensor.axes_labels)
-    }
-
-
-def other_axes_from_labeled_axes(labeled_tensor: LabeledTensor, axis_label: str):
-    # returns the indexes of the axes that are not axis label
-    return tuple(
-        axis
-        for axis, name in enumerate(labeled_tensor.axes_labels)
-        if name != axis_label
-    )
-
-
-def is_conditional_prob(labeled_tensor: LabeledTensor, var_name: str):
-    '''
-    labeled_array (LabeledArray)
-    variable (str): name of variable, i.e. 'a' in p(a|b)
-    '''
-    summation = torch.sum(
-        labeled_tensor.tensor,
-        dim=name_to_axis_mapping(labeled_tensor)[var_name]
-    )
-    return torch.all(torch.isclose(torch.sum(
-        labeled_tensor.tensor,
-        dim=name_to_axis_mapping(labeled_tensor)[var_name]
-    ), torch.tensor(1.0))).item()
-
-
-def is_joint_prob(labeled_tensor: LabeledTensor):
-    return torch.all(torch.isclose(torch.sum(labeled_tensor.tensor), torch.tensor(1.0))).item()
-
-#########################################
-# Factors (and Variables)
-#########################################
-
-
-class FactorType(Enum):
-    PRIOR = "prior"
-    POSTERIOR = "posterior"
-    LIKELIHOOD = "likelihood"
-
 
 class NewFactor:
     _factors = {}
@@ -133,10 +77,6 @@ class NewFactor:
 
     def __repr__(self):
         return f"NewFactor(type={self.type}, value_shape={self.value.shape})"
-
-#########################################
-# Factor Graph
-#########################################
 
 
 class FactorGraph:
@@ -328,6 +268,33 @@ class FactorGraph:
                 msg_sum = msg_posterior + msg_likelihood
 
             self.marginals[i, :] = msg_sum
+
+    # def aggregate_messages(self, messages, operation="sum"):
+    #     """Aggregates incoming messages into a variable via the specified operation.
+
+    #     Args:
+    #         - messages: A list of incoming messages, each with a different shape.
+    #         - operation: The operation to use for aggregation (only "sum" is supported at the moment)
+
+    #     Returns:
+    #         A tensor containing the aggregated messages.
+    #     """
+
+    #     # TODO: I don't know if this keeps the semantic of the messages
+    #     # Reshape the incoming messages to the same shape.
+    #     messages: List[torch.Tensor] = torch.broadcast_tensors(*messages)
+
+    #     messages: torch.Tensor = torch.stack(messages, dim=0)
+
+    #     if operation == "sum":
+    #         # Sum the incoming messages.
+    #         aggregated_messages = torch.sum(messages, dim=0)
+    #     else:
+    #         raise NotImplementedError(
+    #             f"Aggreagtion via the operation {operation} is not implemented yet"
+    #         )
+
+    #     return aggregated_messages
 
     def _initialize_messages(self):
         for factor in self.factors:

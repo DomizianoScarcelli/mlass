@@ -272,15 +272,15 @@ def main(cfg):
 
         gtm = (gt1 + gt2) / 2.0
 
-        print(f"Refining latents for batch {i}")
-        gen1, gen2 = refine_latents(
-            model,
-            gen1lat,
-            gen2lat,
-            gtm,
-            n_iterations=500,
-            learning_rate=1e-1,
-        )
+        # print(f"Refining latents for batch {i}")
+        # gen1, gen2 = refine_latents(
+        #     model,
+        #     gen1lat,
+        #     gen2lat,
+        #     gtm,
+        #     n_iterations=500,
+        #     learning_rate=1e-1,
+        # )
 
         for j in range(len(gen1)):
             img_idx = i * cfg.batch_size + j
