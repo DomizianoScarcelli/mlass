@@ -234,8 +234,6 @@ class FactorGraph:
         Updates the value for the factor that refers to the autoregressive priors 
         p(z^j_i | z^j_{i-1}) for all the j and i.
         """
-        log.debug(f"Computing the autoregressive priors")
-
         prior_factor = [
             factor for factor in self.factors if factor.type == FactorType.PRIOR][0]
 
@@ -256,9 +254,12 @@ class FactorGraph:
                     past_key_values=None
                 )
 
-                # log_priors = normalize_logits(log_priors)
+                log_priors = normalize_logits(log_priors, 1.0)
 
-                probs = torch.softmax(log_priors, dim=0)
+                probs = torch.softmax(log_priors, dim=-1)
+
+                log.debug(f"Probs are {probs}")
+
                 log.debug(
                     f"During autoregressive prior update, the prior shape is {prior_factor.value.shape} \n the probs shape is {probs.shape} \n the log_priors shape is {log_priors.shape}")
                 prior_factor.value[class_idx, i, :] = probs
@@ -321,6 +322,9 @@ class FactorGraph:
             else:
                 msg_sum = msg_posterior + msg_likelihood
 
+            # TODO: mgs values are all very similar and negative
+            log.debug(f"msg sum are: {msg_sum}")
+
             self.marginals[i, :] = torch.softmax(msg_sum, dim=0)
 
             assert is_joint_prob(self.marginals[i]), f"""
@@ -352,12 +356,11 @@ class FactorGraph:
         for it in range(iterations):
             # Update all factor-to-variable messages
             for factor, message in self.msg_fv.items():
-                log.debug(f"Updating the message for factor {factor}")
-                # Prior factor (only depends on one other variable)
                 if factor.type == FactorType.PRIOR:
                     for i in range(self.num_sources):
-
                         zi_factor_value = factor.value[i, :, :].squeeze(0)
+
+                        log.debug(f"zi factor value is {zi_factor_value}")
 
                         updated_message = zi_factor_value * torch.exp(
                             self.msg_vf[factor][i, :, :].squeeze(0)
@@ -373,6 +376,8 @@ class FactorGraph:
                         updated_message = torch.sum(
                             updated_message, dim=tuple(j for j in range(self.num_sources) if i != j))
 
+                        log.debug(
+                            f"Prior updated message is {updated_message}")
                         # TODO: don't know if I need this
                         updated_message = updated_message / \
                             torch.sum(updated_message)
@@ -555,7 +560,7 @@ class FactorGraph:
         # Autoregressive sampling until the sources reach the mixture length
         sources = None
         for t in tqdm(range(self.mixture_length), desc="Separation"):
-            self.belief_propagation(iterations=50)
+            self.belief_propagation(iterations=5)
             samples = self.sample_sources()
             if sources is None:
                 sources = torch.stack(samples, dim=0)
