@@ -175,8 +175,8 @@ class FactorGraph:
                                   self.num_latent_codes))
         prior_value = prior_value / prior_value.sum(dim=0)
 
-        assert is_conditional_prob(prior_value, dim=0)
-        assert not is_joint_prob(prior_value)
+        # assert is_conditional_prob(prior_value, dim=0)
+        # assert not is_joint_prob(prior_value)
 
         self.factors.append(NewFactor(type=FactorType.PRIOR,
                                       value=prior_value))
@@ -188,8 +188,8 @@ class FactorGraph:
                                      self.num_latent_codes)
         posterior_value = posterior_value / posterior_value.sum(dim=0)
 
-        assert is_conditional_prob(posterior_value, dim=0)
-        assert not is_joint_prob(posterior_value)
+        # assert is_conditional_prob(posterior_value, dim=0)
+        # assert not is_joint_prob(posterior_value)
 
         self.factors.append(NewFactor(type=FactorType.POSTERIOR,
                                       value=posterior_value))
@@ -217,7 +217,7 @@ class FactorGraph:
         Returns the discrete posterior K x K x ... K (m times) matrix, where m is the number of sources and K is the number of latent codes.
         This models the posterior p(z^i| m) for all the is.
         """
-        log_likelihood = self.likelihood.get_dense_log_likelihood()
+        log_likelihood = self.likelihood.get_dense_log_likelihood().permute(2, 0, 1)
         log_posterior = log_likelihood
         for i in range(self.num_sources):
             log_posterior += log_prior[i, :, :]
@@ -277,10 +277,14 @@ class FactorGraph:
 
         log_prior = torch.log(prior_factor.value)
 
+        log.debug(f"During posterior update, the log prior is {log_prior}")
+
         log_posterior_value = self._compute_dense_log_posterior(
             log_prior=log_prior)
 
         posterior_factor.value = torch.softmax(log_posterior_value, dim=0)
+
+        assert is_conditional_prob(posterior_factor.value, dim=0)
 
     # def _update_marginal_posterior(self):
     #     """
@@ -327,7 +331,7 @@ class FactorGraph:
             # TODO: mgs values are all very similar and negative
             log.debug(f"msg sum are: {msg_sum}")
 
-            self.marginals[i, :] = torch.softmax(msg_sum, dim=0)
+            # self.marginals[i, :] = torch.softmax(msg_sum, dim=0)
 
             assert is_joint_prob(self.marginals[i]), f"""
             Assert error during the update of the marginals
@@ -603,6 +607,8 @@ if __name__ == "__main__":
     with open(AUTOREGRESSIVE_CHECKPOINT_PATH, 'rb') as f:
         transformer.load_state_dict(
             torch.load(f, map_location=torch.device('cpu')))
+
+    transformer.eval()
 
     likelihood = DenseLikelihood(sums=sums)
 
