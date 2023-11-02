@@ -15,6 +15,12 @@ class UnconditionedTransformerPrior(SeparationPrior):
         self.transformer.eval()
         self.label = sos
 
+    def __repr__(self):
+        return f"UnconditionedTransformerPrior, label={self.label}"
+
+    def __str__(self):
+        return f"UnconditionedTransformerPrior, label={self.label}"
+
     def get_sos(self):
         return torch.tensor(self.label, dtype=torch.long).view(1).to(self.get_device())
 

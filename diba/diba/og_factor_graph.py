@@ -239,7 +239,8 @@ class FactorGraph:
         # list of the autoregressive priors
         UNCOND_BOS = 0
         self.priors = [UnconditionedTransformerPrior(
-            transformer=self.transformer, sos=UNCOND_BOS) for _ in range(self.num_sources)]
+            transformer=self.transformer,
+            sos=UNCOND_BOS) for _ in range(self.num_sources)]
 
         ##########################
         # Initialize the factors #

@@ -125,7 +125,7 @@ def generate_samples(
         mixture = torch.tensor(codes_mixture[bi])
 
         factor_graph = FactorGraph(
-            num_sources=2, mixture=mixture, likelihood=likelihood)
+            num_sources=2, mixture=mixture, likelihood=likelihood, transformer=transformer)
 
         z0, z1 = factor_graph.separate()
 

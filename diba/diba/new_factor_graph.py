@@ -130,7 +130,7 @@ class NewFactor:
 
 class FactorGraph:
     @timeit
-    def __init__(self, num_sources: int, mixture: torch.Tensor, likelihood: DenseLikelihood) -> None:
+    def __init__(self, num_sources: int, mixture: torch.Tensor, likelihood: DenseLikelihood, transformer: GPT2LMHeadModel) -> None:
         """
         Initialize the factor graph
         @params num_classes: number of sources to separate 
@@ -141,7 +141,8 @@ class FactorGraph:
         self.mixture_length = len(mixture)  # 'n' in the equations
 
         # always None in the case of uncoditional priors
-        self.pasts = [None for _ in range(self.num_sources)]
+        self.pasts = [torch.tensor([0]).view(-1, 1)
+                      for _ in range(self.num_sources)]
         self.likelihood = likelihood
         self.num_latent_codes = self.likelihood.get_tokens_count()  # 256 in the case of MNIST
         # This should have shape (num_sources + 1, num_latent_codes)
@@ -152,19 +153,7 @@ class FactorGraph:
 
         log.debug(f"Length of the mixture is: {self.mixture_length}")
 
-        # initialize the transformer
-        transformer_config = GPT2Config(
-            vocab_size=self.num_latent_codes,
-            n_positions=self.mixture_length,
-            n_embd=128,
-            n_layer=3,
-            n_head=2,
-            use_cache=False,
-            bos_token_id=0,
-            eos_token_id=511,)
-
-        self.transformer = GPT2LMHeadModel(
-            config=transformer_config)
+        self.transformer = transformer
 
         # list of the autoregressive priors
         UNCOND_BOS = 0
@@ -179,7 +168,6 @@ class FactorGraph:
 
         # Autoregressive priors
         # p(z^j_i | z^j_{i-1}): tensor[z^j_i, z^j_{i-1}]
-
         # TODO: The shape should be (num_sources, num_latent_codes, num_latent_codes)
         # if the prior is conditioned to the class index, otherwise it should be (num_latent_codes, num_latent_codes)
         prior_value = torch.ones((self.num_sources,
@@ -189,6 +177,7 @@ class FactorGraph:
 
         assert is_conditional_prob(prior_value, dim=0)
         assert not is_joint_prob(prior_value)
+
         self.factors.append(NewFactor(type=FactorType.PRIOR,
                                       value=prior_value))
 
@@ -198,16 +187,20 @@ class FactorGraph:
                                      self.num_latent_codes,
                                      self.num_latent_codes)
         posterior_value = posterior_value / posterior_value.sum(dim=0)
+
         assert is_conditional_prob(posterior_value, dim=0)
         assert not is_joint_prob(posterior_value)
+
         self.factors.append(NewFactor(type=FactorType.POSTERIOR,
                                       value=posterior_value))
 
         # Likelihood factors P(m| z^1, z^2, ..., z^k): tensor[m, z^1, z^2, ..., z^k]
         likelihood_value = torch.softmax(
             self.likelihood.get_dense_log_likelihood().permute(2, 0, 1), dim=0)
+
         assert is_conditional_prob(likelihood_value, dim=0)
         assert not is_joint_prob(likelihood_value)
+
         self.factors.append(NewFactor(type=FactorType.LIKELIHOOD,
                                       value=likelihood_value))
 
@@ -225,11 +218,13 @@ class FactorGraph:
         This models the posterior p(z^i| m) for all the is.
         """
         log_likelihood = self.likelihood.get_dense_log_likelihood()
-        source = 0  # TODO: just for debugging
-        log_posterior = log_likelihood + log_prior[source, :, :]
+        log_posterior = log_likelihood
+        for i in range(self.num_sources):
+            log_posterior += log_prior[i, :, :]
         return log_posterior
 
     def _update_autoregressive_prior(self):
+        torch.set_printoptions(precision=2, sci_mode=False)
         """
         Updates the value for the factor that refers to the autoregressive priors 
         p(z^j_i | z^j_{i-1}) for all the j and i.
@@ -237,32 +232,39 @@ class FactorGraph:
         prior_factor = [
             factor for factor in self.factors if factor.type == FactorType.PRIOR][0]
 
+        # Prior gives me the probability distribution of the next code, for the codes that have z^j_{i-1} = self.pasts[j][-1]
         for class_idx in range(self.num_sources):
             class_prior: UnconditionedTransformerPrior = self.priors[class_idx]
-            for i in range(self.mixture_length):
-                current_source = self.pasts[class_idx] if self.pasts[class_idx] is not None else class_prior.get_sos(
-                ).unsqueeze(0)
-                current_source = current_source.to(torch.long)
+            current_source = self.pasts[class_idx]
+            current_source = current_source.to(torch.long)
 
-                log.debug(
-                    f"During autoregressive prior update, the current source shape is {current_source.shape}")
+            latest_past = current_source[:, -1].view(-1).item()
 
-                # Log priors shape should be torch.Size([1, 256])
-                # Current source shape sould be torch.Size([1, n]) where n is the number of tokens samples so far
-                log_priors, _ = class_prior.get_logits(
-                    token_ids=current_source,
-                    past_key_values=None
-                )
+            log.debug(f"Latest past is {latest_past}")
 
-                log_priors = normalize_logits(log_priors, 1.0)
+            log.debug(
+                f"During autoregressive prior update, the current source shape is {current_source.shape}")
 
-                probs = torch.softmax(log_priors, dim=-1)
+            # Log priors shape should be torch.Size([1, 256])
+            # Current source shape sould be torch.Size([1, n]) where n is the number of tokens samples so far
+            log_priors, _ = class_prior._get_logits(
+                current_source,
+                past_key_value=None
+            )
 
-                log.debug(f"Probs are {probs}")
+            log_priors = normalize_logits(log_priors, 1.0).squeeze(0)
 
-                log.debug(
-                    f"During autoregressive prior update, the prior shape is {prior_factor.value.shape} \n the probs shape is {probs.shape} \n the log_priors shape is {log_priors.shape}")
-                prior_factor.value[class_idx, i, :] = probs
+            probs = torch.softmax(log_priors, dim=0)
+
+            assert is_conditional_prob(probs, dim=0)
+
+            log.debug(
+                f"Prior slice shape is {prior_factor.value[class_idx, :, latest_past].shape}, while probs shape is {probs.shape}")
+
+            prior_factor.value[class_idx, :, latest_past] = probs
+
+            log.debug(
+                f"Prior factor value for current source: {current_source}, classIdx: {class_idx} and latest_past: {latest_past} is {prior_factor.value[class_idx, :, latest_past]} and log_priors is {log_priors}")
 
     def _update_posterior(self):
         """
@@ -378,9 +380,10 @@ class FactorGraph:
 
                         log.debug(
                             f"Prior updated message is {updated_message}")
-                        # TODO: don't know if I need this
-                        updated_message = updated_message / \
-                            torch.sum(updated_message)
+
+                        # # TODO: don't know if I need this
+                        # updated_message = updated_message / \
+                        #     torch.sum(updated_message)
 
                         assert updated_message.shape == (self.num_latent_codes,), f"""
                         Assert error for factor {factor} during factor-to-variable message update
@@ -423,8 +426,8 @@ class FactorGraph:
                         updated_message = torch.sum(
                             updated_message, dim=tuple(j for j in range(self.num_sources + 1) if i != j))
 
-                        updated_message = updated_message / \
-                            torch.sum(updated_message)
+                        # updated_message = updated_message / \
+                        #     torch.sum(updated_message)
 
                         assert updated_message.shape == (self.num_latent_codes,), f"""
                         Assert error for factor {factor} during factor-to-variable message update
@@ -558,20 +561,16 @@ class FactorGraph:
 
     def separate(self) -> torch.Tensor:
         # Autoregressive sampling until the sources reach the mixture length
-        sources = None
-        for t in tqdm(range(self.mixture_length), desc="Separation"):
+        sources = torch.stack(self.pasts, dim=0).view(-1, 1)
+        for t in tqdm(range(self.mixture_length - 1), desc="Separation"):
             self.belief_propagation(iterations=5)
             samples = self.sample_sources()
-            if sources is None:
-                sources = torch.stack(samples, dim=0)
-            else:
-                sources = torch.cat(
-                    (sources, torch.stack(samples, dim=0)), dim=1)
+            samples = torch.stack(samples, dim=0).view(-1, 1)
+            sources = torch.cat((sources, samples), dim=1)
             log.debug(f"Sampled sources at step {t} are: {samples}")
             log.debug(f"Sources at step {t} are : {sources}")
             self.pasts[0] = sources[0].view(1, -1)
             self.pasts[1] = sources[1].view(1, -1)
-
         return sources
 
 
@@ -587,10 +586,28 @@ if __name__ == "__main__":
     with open(SUMS_CHECKPOINT_PATH, 'rb') as f:
         sums = torch.load(f, map_location=torch.device('cpu'))
 
+    transformer_config = GPT2Config(
+        vocab_size=256,
+        n_positions=len(mixture),
+        n_embd=128,
+        n_layer=3,
+        n_head=2,
+        use_cache=False,
+        bos_token_id=0,
+        eos_token_id=511,)
+
+    transformer = GPT2LMHeadModel(
+        config=transformer_config)
+
+    AUTOREGRESSIVE_CHECKPOINT_PATH = "lass_mnist/checkpoints/unconditioned/256-sigmoid-big.pt"
+    with open(AUTOREGRESSIVE_CHECKPOINT_PATH, 'rb') as f:
+        transformer.load_state_dict(
+            torch.load(f, map_location=torch.device('cpu')))
+
     likelihood = DenseLikelihood(sums=sums)
 
     factor_graph = FactorGraph(
-        num_sources=2, mixture=mixture, likelihood=likelihood)
+        num_sources=2, mixture=mixture, likelihood=likelihood, transformer=transformer)
 
     sources = factor_graph.separate()
 
