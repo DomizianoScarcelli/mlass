@@ -170,6 +170,7 @@ class FactorGraph:
         self.factors: List[NewFactor] = []
 
         prior_value = self._init_prior_values()
+        log.debug(f"Prior value is {prior_value}")
         assert is_conditional_prob(prior_value, dim=1)
         assert not is_joint_prob(prior_value)
 
@@ -196,7 +197,6 @@ class FactorGraph:
 
     def _init_prior_values(self):
         prior_factor = torch.empty((self.num_sources,
-                                    self.num_latent_codes,
                                     self.num_latent_codes))
         pbar = tqdm(total=self.num_sources *
                     self.num_latent_codes, desc="Initializing prior values")
@@ -207,11 +207,6 @@ class FactorGraph:
                 current_source = current_source.to(torch.long)
 
                 latest_past = mixture_i
-
-                log.debug(f"Latest past is {latest_past}")
-
-                log.debug(
-                    f"During autoregressive prior update, the current source shape is {current_source.shape}")
 
                 # Log priors shape should be torch.Size([1, 256])
                 # Current source shape sould be torch.Size([1, n]) where n is the number of tokens samples so far
@@ -226,15 +221,10 @@ class FactorGraph:
 
                 assert is_conditional_prob(probs, dim=0)
 
-                log.debug(
-                    f"Prior slice shape is {prior_factor[class_idx, :, latest_past].shape}, while probs shape is {probs.shape}")
-
-                prior_factor[class_idx, :, latest_past] = probs
+                prior_factor[class_idx] = probs
 
                 pbar.update(1)
 
-                log.debug(
-                    f"Prior factor value for current source: {current_source}, classIdx: {class_idx} and latest_past: {latest_past} is {prior_factor[class_idx, :, latest_past]} and log_priors is {log_priors}")
         return prior_factor
 
     def _update_autoregressive_prior(self):
@@ -252,7 +242,7 @@ class FactorGraph:
             current_source = self.pasts[class_idx]
             current_source = current_source.to(torch.long)
 
-            latest_past = current_source[:, -1].view(-1).item()
+            latest_past = current_source.view(-1)
 
             log.debug(f"Latest past is {latest_past}")
 
@@ -270,15 +260,15 @@ class FactorGraph:
 
             probs = torch.softmax(log_priors, dim=0)
 
-            assert is_conditional_prob(probs, dim=0)
+            # assert is_conditional_prob(probs, dim=0)
 
             log.debug(
-                f"Prior slice shape is {prior_factor.value[class_idx, :, latest_past].shape}, while probs shape is {probs.shape}")
+                f"Prior slice shape is {prior_factor.value[class_idx].shape}, while probs shape is {probs.shape}")
 
-            prior_factor.value[class_idx, :, latest_past] = probs
+            prior_factor.value[class_idx] = probs
 
             log.debug(
-                f"Prior factor value for current source: {current_source}, classIdx: {class_idx} and latest_past: {latest_past} is {prior_factor.value[class_idx, :, latest_past]} and log_priors is {log_priors}")
+                f"Prior factor value for current source: {current_source}, classIdx: {class_idx} and latest_past: {latest_past} is {prior_factor.value[class_idx]} and log_priors is {log_priors}")
 
     def _get_marginal_posterior(self):
         """
@@ -348,14 +338,14 @@ class FactorGraph:
             for factor, message in self.msg_fv.items():
                 if factor.type == FactorType.PRIOR:
                     for i in range(self.num_sources):
-                        zi_factor_value = factor.value[i, :, :].squeeze(0)
+                        zi_factor_value = factor.value[i].squeeze(0)
 
                         log.debug(
                             f"zi factor value is {zi_factor_value}")
 
                         updated_message = zi_factor_value * torch.exp(
                             torch.sum(self.msg_vf[factor]
-                                      [:, i, :, :], dim=0)
+                                      [:, i], dim=0)
                         )
 
                         log.debug(
@@ -368,15 +358,15 @@ class FactorGraph:
                         Factor value shape: {zi_factor_value.shape}
                         """
 
-                        updated_message = torch.sum(
-                            updated_message, dim=tuple(j for j in range(self.num_sources) if i != j))
+                        # updated_message = torch.sum(
+                        # updated_message, dim=tuple(j for j in range(self.num_sources) if i != j))
 
                         log.debug(
                             f"Prior updated message before normalization is {updated_message}")
 
                         # TODO: don't know if I need this
-                        updated_message = updated_message / \
-                            torch.sum(updated_message)
+                        # updated_message = updated_message / \
+                        #     torch.sum(updated_message)
 
                         log.debug(
                             f"Prior updated message before log is {updated_message}")
@@ -424,8 +414,8 @@ class FactorGraph:
                         updated_message = torch.sum(
                             updated_message, dim=tuple(j for j in range(self.num_sources + 1) if i != j))
 
-                        updated_message = updated_message / \
-                            torch.sum(updated_message)
+                        # updated_message = updated_message / \
+                        #     torch.sum(updated_message)
 
                         assert updated_message.shape == (self.num_latent_codes,), f"""
                         Assert error for factor {factor} during factor-to-variable message update
@@ -461,22 +451,31 @@ class FactorGraph:
                         if fact != factor:
                             incoming_messages.append(message)
 
-                    stacked_incoming_messages = torch.cat(
+                    stacked_incoming_messages = torch.stack(
                         incoming_messages, dim=0)
+
+                    print(
+                        f"Stacked incoming messages shape is {stacked_incoming_messages.shape}")
 
                     sum_incoming_messages = torch.sum(
                         stacked_incoming_messages, dim=0)
 
-                    sum_incoming_messages = sum_incoming_messages / \
-                        torch.sum(sum_incoming_messages)
+                    # sum_incoming_messages = sum_incoming_messages / \
+                    # torch.sum(sum_incoming_messages)
 
                     assert sum_incoming_messages.shape == torch.Size([self.num_latent_codes, self.num_latent_codes]), f"""
                     Assert error for factor {factor} during variable-to-factor message update
                     The shape of the sum of the incoming messages is not correct
                     The shape of the sum of the incoming messages is {sum_incoming_messages.shape}, while it should be {torch.Size([self.num_latent_codes, self.num_latent_codes])}
                     """
-
-                    self.msg_vf[factor][:, i] = sum_incoming_messages
+                    if factor.type == FactorType.PRIOR:
+                        # TODO: the incoming message sum shape is [256,256] but the msg_vf shape is [2,256])
+                        self.msg_vf[factor][i] = sum_incoming_messages
+                    else:
+                        # TODO: on the other hand, the incoming message sum shape is [256,256] but the msg_vf shape is [3, 256, 256, 256])
+                        print(f"msgvf shape is {self.msg_vf[factor].shape}")
+                        self.msg_vf[factor][i] = sum_incoming_messages
+                        raise NotImplementedError
 
                     assert torch.sum(self.msg_vf[factor], dim=0).shape == factor.value.shape, f"""
                     Assert error for factor {factor} during variable-to-factor message update
@@ -500,11 +499,16 @@ class FactorGraph:
 
         marginal_posterior_sliced = self.marginal_posterior[:,
                                                             self.mixture[time_step]]
+
+        marginal_posterior_sliced = torch.softmax(
+            marginal_posterior_sliced, dim=1)
+
+        assert is_conditional_prob(marginal_posterior_sliced, dim=1)
+
         # top_k_probs = torch.topk(probs, k=10, dim=-1).values
         samples = torch.multinomial(
             marginal_posterior_sliced, num_samples=1, replacement=True)
 
-        log.debug(f"Sampled shape is {samples.shape}")
         return samples
 
     def separate(self) -> torch.Tensor:
