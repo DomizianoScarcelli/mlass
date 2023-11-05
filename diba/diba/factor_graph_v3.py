@@ -191,8 +191,8 @@ class PosteriorFactorGraph:
             variables (List[Variable]): list of variables
         '''
         # Create variables
-        for i in tqdm(range(self.num_latent_variables), desc="Creating source variables"):
-            for j in range(self.num_sources):
+        for j in range(self.num_sources):
+            for i in tqdm(range(self.num_latent_variables), desc="Creating source variables"):
                 variable = Variable(class_idx=j, idx=i)
                 self._variables[variable] = variable
 
@@ -210,12 +210,13 @@ class PosteriorFactorGraph:
             posterior.value = self.log_posterior[:, i]
 
             assert posterior.value.shape == torch.Size(
-                [self.num_latent_variables])
+                [self.num_latent_variables, self.num_latent_variables])
 
             variables = []
-            for var in self.past_z[j]:
-                variables.append(var)
-            variables.append(Variable(class_idx=j, idx=i))
+            # for var in self.past_z[j]:
+            # variables.append(var)
+            for j in range(self.num_sources):
+                variables.append(Variable(class_idx=j, idx=i))
 
             variable: Variable
             for variable in variables:
@@ -258,10 +259,28 @@ class PosteriorFactorGraph:
             for factor in variable.neighbors:
                 self.msg_vf[variable][factor] = 0
 
+    def _get_other_indexes(self, variable: Variable, factor: PosteriorFactor) -> Tuple[int]:
+        return tuple(var.idx for var in factor.neighbors if var != variable)
+
     def belief_propagation(self):
         # Update factor-to-variable messages
         for factor, msg_to_v in self.msg_fv.items():
-            raise NotImplementedError
+            incoming_messages = []
+            for variable in factor.neighbors:
+                incoming_messages.extend(
+                    [self.msg_vf[var][factor] for var in msg_to_v if var != variable])
+                print(
+                    f"Incomign message with factor {factor} is {incoming_messages}")
+                exp_sum_incoming_messages = torch.exp(torch.sum(
+                    torch.tensor(incoming_messages), dim=0))
+
+                updated_message = factor.value * \
+                    exp_sum_incoming_messages
+
+                msg_to_v[variable] = updated_message
+
+                print(f"Updated message is {updated_message}")
+                raise NotImplementedError
 
         pass
 
@@ -312,6 +331,8 @@ if __name__ == "__main__":
     for t in range(mixture_length):
         factor_graph = PosteriorFactorGraph(
             num_sources=2, mixture_t=mixture[t], likelihood=likelihood, transformer=transformer, past_z=past)
+
+        factor_graph.belief_propagation()
 
         print(
             f"Number of factor-to-variable messages: {len(factor_graph.msg_fv)}")
