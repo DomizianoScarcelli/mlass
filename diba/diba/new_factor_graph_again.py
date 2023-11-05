@@ -312,11 +312,17 @@ class FactorGraph:
 
     def _initialize_messages(self):
         for factor in self.factors:
-            fv_shape = (self.num_sources + 1, self.num_latent_codes, self.num_latent_codes) if factor.type != FactorType.PRIOR else (
-                self.num_sources, self.num_latent_codes, self.num_latent_codes)
+            # since messages from extremal node factors are initialized to factor and
+            # messages from other factors are initialized to 1
+            # this means that:
+            #   the shape of mgs_vf is equal to the shape of the variable
+            #   the shape of msg_fv is equal to the shape of the factor
 
-            vf_shape = (self.num_sources + 1, *factor.value.shape) if factor.type != FactorType.PRIOR else (
+            fv_shape = (self.num_sources + 1, *factor.value.shape) if factor.type != FactorType.PRIOR else (
                 self.num_sources, *factor.value.shape)
+
+            vf_shape = (self.num_sources + 1, self.num_sources, self.num_latent_codes) if factor.type != FactorType.PRIOR else (
+                self.num_sources, self.num_sources, self.num_latent_codes)
 
             # shape of the variable state space for each variable
             self.msg_fv[factor] = torch.zeros(size=fv_shape)
@@ -400,6 +406,8 @@ class FactorGraph:
 
                 else:
                     for i in range(self.num_sources + 1):
+                        print(f"msg_vf shape is {self.msg_vf[factor].shape}")
+                        print(f"Factor value shape is {factor.value.shape}")
                         updated_message = factor.value * torch.exp(
                             torch.sum(self.msg_vf[factor], dim=0)
                         )
@@ -451,7 +459,8 @@ class FactorGraph:
                         if fact != factor:
                             incoming_messages.append(message)
 
-                    stacked_incoming_messages = torch.stack(
+                    # Since there are only two factors, the incoming_message will have length of 1
+                    stacked_incoming_messages = torch.cat(
                         incoming_messages, dim=0)
 
                     print(
@@ -469,13 +478,20 @@ class FactorGraph:
                     The shape of the sum of the incoming messages is {sum_incoming_messages.shape}, while it should be {torch.Size([self.num_latent_codes, self.num_latent_codes])}
                     """
                     if factor.type == FactorType.PRIOR:
-                        # TODO: the incoming message sum shape is [256,256] but the msg_vf shape is [2,256])
-                        self.msg_vf[factor][i] = sum_incoming_messages
+                        print(
+                            f"msgvf for prior shape is {self.msg_vf[factor].shape}")
+                        print(
+                            f"Sum incoming message for prior has shape {sum_incoming_messages.shape}")
+                        # TODO: the incoming message sum shape is [256, 256] but the msg_vf shape is [2, 2, 256])
+                        self.msg_vf[factor][i] = torch.sum(
+                            sum_incoming_messages, dim=0)
                     else:
                         # TODO: on the other hand, the incoming message sum shape is [256,256] but the msg_vf shape is [3, 256, 256, 256])
                         print(f"msgvf shape is {self.msg_vf[factor].shape}")
-                        self.msg_vf[factor][i] = sum_incoming_messages
-                        raise NotImplementedError
+                        print(
+                            f"Sum incoming message has shape {sum_incoming_messages.shape}")
+                        self.msg_vf[factor][i] = sum_incoming_messages.unsqueeze(
+                            -1)
 
                     assert torch.sum(self.msg_vf[factor], dim=0).shape == factor.value.shape, f"""
                     Assert error for factor {factor} during variable-to-factor message update

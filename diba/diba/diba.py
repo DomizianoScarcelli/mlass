@@ -109,19 +109,21 @@ class _SeparationModel(PreTrainedModel):
         log_p_0 = normalize_logits(log_p_0, self.temperature)
         log_p_1 = normalize_logits(log_p_1, self.temperature)
 
+        print("----------------")
         print(f"Temperature is {self.temperature}")
         print(f"Prior 0 is {self.prior_0}")
         print(f"Prior 1 is {self.prior_1}")
         print(f"Past 0 is {past_0}")
         print(f"Past 1 is {past_1}")
-        print(f"Logp0 is {log_p_0}")
-        print(f"Logp1 is {log_p_1}")
+        print(f"Logp0 is {log_p_0} with shape {log_p_0.shape}")
+        print(f"Logp1 is {log_p_1} with shape {log_p_1.shape}")
         print(f"X_0 is {x_0} with shape {x_0.shape}")
         print(f"X_1 is {x_1} with shape {x_1.shape}")
         print(f"Softmaxed logp0 is {torch.softmax(log_p_0, dim=-1)}")
         print(f"Softmaxed logp1 is {torch.softmax(log_p_1, dim=-1)}")
 
-        raise RuntimeError("Stop here")
+        if x_0.shape[1] != 1:
+            raise RuntimeError("STop")
 
         # log likelihood in sparse COO format
         # ll_coords shape is torch.Size([2, 553]), while ll_data shape is torch.Size([553])
