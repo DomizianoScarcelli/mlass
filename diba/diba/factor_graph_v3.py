@@ -210,7 +210,7 @@ class PosteriorFactorGraph:
             posterior.value = self.log_posterior[:, i]
 
             assert posterior.value.shape == torch.Size(
-                [self.num_latent_variables, self.num_latent_variables])
+                [self.num_latent_variables])
 
             variables = []
             # for var in self.past_z[j]:
