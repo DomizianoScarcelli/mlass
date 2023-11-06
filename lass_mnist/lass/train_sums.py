@@ -57,6 +57,11 @@ def train(data_loader, sums, model, args, writer, step):
         # NOTE: this is hardcoded because i don't know how to do it dynamically
         # TODO: in the paper they say they permute the codes in order to have commutativity, but I cannot find this in the code
         sums[codes[0], codes[1], codes[2], codes_mixture] += 1
+        sums[codes[0], codes[2], codes[1], codes_mixture] += 1
+        sums[codes[1], codes[0], codes[2], codes_mixture] += 1
+        sums[codes[1], codes[2], codes[0], codes_mixture] += 1
+        sums[codes[2], codes[0], codes[1], codes_mixture] += 1
+        sums[codes[2], codes[1], codes[0], codes_mixture] += 1
 
         step += 1
     return step
