@@ -1,8 +1,10 @@
 from enum import Enum
 import time
 from typing import Dict, List, NamedTuple, Set, Tuple, Union
+import numpy as np
 import torch
 from tqdm import tqdm
+from diba.diba.diba import _compute_log_posterior
 from diba.diba.utils import normalize_logits
 
 from lass_mnist.lass.diba_interaces import DenseLikelihood, UnconditionedTransformerPrior
@@ -141,7 +143,6 @@ class FactorGraph:
         """
         self.num_sources = num_sources  # 'k' in the equations
         self.mixture_t = mixture_t  # 'm' in the equations
-        self.mixture_length = len(mixture)  # 'n' in the equations
 
         # always None in the case of uncoditional priors
         self.past_z = past_z
@@ -176,13 +177,13 @@ class FactorGraph:
     def __repr__(self):
         return f"""FactorGraph(
             num_sources={self.num_sources},
-            mixture_length={self.mixture_length}, 
             num_latent_codes={self.num_latent_codes},
             factors={self.factors}"""
 
     def _compute_posterior(self):
-        dense_log_likelihood = self.likelihood.get_dense_log_likelihood().permute(2, 0, 1)
-        sliced_likelihood = dense_log_likelihood[self.mixture_t]
+        # dense_log_likelihood = self.likelihood.get_dense_log_likelihood().permute(2, 0, 1)
+        # sliced_likelihood = dense_log_likelihood[self.mixture_t]
+        ll_coords, ll_data = self.likelihood.get_log_likelihood(self.mixture_t)
         log_priors = torch.empty((self.num_sources, self.num_latent_codes))
         for j in range(self.num_sources):
             prior = self.priors[j]
@@ -194,9 +195,32 @@ class FactorGraph:
                 past_key_values=None,
             )
 
-            log_prior = normalize_logits(log_prior).squeeze(0)
+            log_prior = log_prior.squeeze(0)
+
+            # log_prior = normalize_logits(log_prior).squeeze(0)
 
             log_priors[j] = log_prior
+
+        log.debug(f"Log priors are {log_priors}")
+
+        posterior_data = _compute_log_posterior(
+            nll_coords=ll_coords,
+            nll_data=ll_data,
+            log_p0=log_priors[0].unsqueeze(0),
+            log_p1=log_priors[1].unsqueeze(0),
+        )
+
+        # log_posterior = ll_data + \
+        #     log_priors[:, ll_coords[0]] + log_priors[:, ll_coords[1]]
+
+        coords0, coords1 = ll_coords
+        num_samples, _ = posterior_data.shape
+        logits = torch.full(size=(num_samples, self.num_latent_codes**2),
+                            fill_value=np.log(1e-16), device="cpu")
+        logits.index_copy_(-1, coords0 *
+                           self.num_latent_codes + coords1, posterior_data)
+
+        return logits.view(num_samples, self.num_latent_codes, self.num_latent_codes)
 
         log_posterior = sliced_likelihood + log_prior[0] + log_prior[1]
         return log_posterior
@@ -209,7 +233,7 @@ class FactorGraph:
             #   the shape of mgs_vf is equal to the shape of the variable
             #   the shape of msg_fv is equal to the shape of the factor
 
-            print(f"Factor value is {factor.value}")
+            log.debug(f"Factor value is {factor.value}")
 
             fv_shape = (self.num_sources, *factor.value.shape)
 
@@ -231,7 +255,7 @@ class FactorGraph:
             incoming_messages = torch.cat(
                 [self.msg_fv[fac] for fac in self.factors], dim=0)
 
-            print(f"Incoming message shape is {incoming_messages.shape}")
+            log.debug(f"Incoming message shape is {incoming_messages.shape}")
             sum_incoming_message = torch.sum(
                 incoming_messages, dim=0)
 
@@ -250,7 +274,8 @@ class FactorGraph:
             # Update all factor-to-variable messages
             for factor, message in self.msg_fv.items():
                 for i in range(self.num_sources):
-                    print(f"The shape of the factor is {factor.value.shape}")
+                    log.debug(
+                        f"The shape of the factor is {factor.value.shape}")
 
                     incoming_messages = self.msg_vf[factor]
 
@@ -292,40 +317,47 @@ class FactorGraph:
 
         return
 
-    # def sample_sources(self, time_step: int) -> torch.Tensor:
+    def sample(self):
+        """
+        Naive marginalizaiton via summing
+        """
+        joint_posterior_factor = self.factors[0].value.squeeze(0)
+        log.debug(
+            f"Joint posterior factor value shape is {joint_posterior_factor.shape}")
+        for j in range(self.num_sources):
+            joint_posterior_sum = torch.softmax(torch.sum(torch.softmax(
+                joint_posterior_factor, dim=j), dim=self._get_other_indexes(j)), dim=0)
 
-    #     assert self.marginal_posterior.shape == torch.Size([self.num_sources, self.num_latent_codes, self.num_latent_codes]), f"""
-    #     The shape of the marginals is not correct.
-    #     The shape of the marginals is {self.marginal_posterior.shape}, while it should be {(self.num_sources, self.num_latent_codes, self.num_latent_codes)}
-    #     """
+            log.debug(f"Joint posterior sum is {joint_posterior_sum}")
 
-    #     marginal_posterior_sliced = self.marginal_posterior[:,
-    #                                                         self.mixture[time_step]]
+            log.debug(
+                f"Joint posterior sum on index {self._get_other_indexes(j)} shape is {joint_posterior_sum.shape}")
 
-    #     marginal_posterior_sliced = torch.softmax(
-    #         marginal_posterior_sliced, dim=1)
+            self.marginal_posteriors[j] = joint_posterior_sum
 
-    #     assert is_conditional_prob(marginal_posterior_sliced, dim=1)
+            log.debug(f"Marginal posterior are: {self.marginal_posterior[j]}")
 
-    #     # top_k_probs = torch.topk(probs, k=10, dim=-1).values
-    #     samples = torch.multinomial(
-    #         marginal_posterior_sliced, num_samples=1, replacement=True)
+        log.debug(
+            f"Marginal posterior shape is {self.marginal_posterior.shape}")
+        samples = torch.multinomial(
+            self.marginal_posteriors, num_samples=1, replacement=True)
+        return samples
 
-    #     return samples
 
-    # def separate(self) -> torch.Tensor:
-    #     # Autoregressive sampling until the sources reach the mixture length
-    #     sources = torch.stack(self.pasts, dim=0).view(-1, 1)
-    #     for t in tqdm(range(self.mixture_length - 1), desc="Separation"):
-    #         # TODO: change according to the number of iterations
-    #         self.belief_propagation(iterations=5)
-    #         samples = self.sample_sources(time_step=t)
-    #         sources = torch.cat((sources, samples), dim=1)
-    #         log.debug(f"Sampled sources at step {t} are: {samples}")
-    #         log.debug(f"Sources at step {t} are : {sources}")
-    #         self.pasts[0] = sources[0].view(1, -1)
-    #         self.pasts[1] = sources[1].view(1, -1)
-    #     return sources
+def separate(mixture: torch.Tensor, likelihood: DenseLikelihood, transformer: GPT2LMHeadModel):
+    past = torch.tensor([[0], [0]])
+    mixture_length = len(mixture)
+    all_samples = past.detach().clone()
+    for t in range(mixture_length - 1):
+        factor_graph = FactorGraph(
+            num_sources=2, mixture_t=mixture[t], likelihood=likelihood, transformer=transformer, past_z=past)
+        samples = factor_graph.sample()
+        log.debug(
+            f"Samples shape is {samples.shape}, while all_samples shape is {all_samples.shape}")
+        all_samples = torch.cat((all_samples, samples), dim=1)
+        log.debug(f"Past at time step {t} is {past}")
+        past = all_samples
+    return all_samples
 
 
 if __name__ == "__main__":
@@ -362,12 +394,7 @@ if __name__ == "__main__":
 
     likelihood = DenseLikelihood(sums=sums)
 
-    past = torch.tensor([[0], [0]])
-    mixture_length = len(mixture)
-    for t in range(mixture_length):
-        factor_graph = FactorGraph(
-            num_sources=2, mixture_t=mixture[t], likelihood=likelihood, transformer=transformer, past_z=past)
-        marginal_posterior = factor_graph.belief_propagation(iterations=5)
+    all_samples = separate(mixture=mixture, likelihood=likelihood,
+                           transformer=transformer)
 
-        print(
-            f"Marginal posterior is {marginal_posterior} with shape {marginal_posterior.shape}")
+    log.debug(f"All samples are {all_samples} with shape {all_samples.shape}")

@@ -144,3 +144,5 @@ dmypy.json
 **/outputs/**
 **/separated-images/**
 **/multi-separated-images/**
+
+logs

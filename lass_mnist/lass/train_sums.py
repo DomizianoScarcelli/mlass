@@ -1,6 +1,7 @@
 import multiprocessing as mp
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any, List
 
 import hydra
@@ -8,56 +9,86 @@ import torch
 from omegaconf import MISSING
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.utils import make_grid
+from tqdm import tqdm
 from .utils import CONFIG_DIR, CONFIG_STORE, ROOT_DIR
+
+NUM_SOURCES = 3
 
 
 def roll(x, n):
     return torch.cat((x[:, -n:], x[:, :-n]), dim=1)
 
 
+def split_images_by_step(images: torch.Tensor, batch_size: int, step: int) -> List[torch.Tensor]:
+    image_batches = []
+
+    batched_images_size = batch_size // step
+
+    for i in range(len(images) // batched_images_size):
+        image_batches.append(
+            images[i * batched_images_size: (i + 1) * batched_images_size])
+
+    return image_batches
+
+
 def train(data_loader, sums, model, args, writer, step):
-    for images, _ in data_loader:
+    for images, _ in tqdm(data_loader, desc="Training sums"):
         images = images.to(args.device)
-        images1 = images[: args.batch_size // 2]
-        images2 = images[args.batch_size // 2:]
-        images_mixture = 0.5 * images1 + 0.5 * images2
+        sources_images = split_images_by_step(
+            images, args.batch_size, step=NUM_SOURCES)
+        images_mixture = torch.mean(torch.stack(sources_images), dim=0)
 
         with torch.no_grad():
-            _, z_e_x1, _ = model(images1)
-            _, z_e_x2, _ = model(images2)
+            z_e_xs = []
+            for images in sources_images:
+                _, z_e_x, _ = model(images)
+                z_e_xs.append(z_e_x)
             _, z_e_x_mixture, _ = model(images_mixture)
-            codes1 = model.codeBook(z_e_x1)
-            codes2 = model.codeBook(z_e_x2)
+            codes: List[torch.Tensor] = [
+                model.codeBook(z_e_x) for z_e_x in z_e_xs]
             codes_mixture = model.codeBook(z_e_x_mixture)
 
-        codes1 = codes1.flatten()
-        codes2 = codes2.flatten()
+        codes: torch.Tensor = torch.stack(
+            [code.flatten() for code in codes], dim=0)
         codes_mixture = codes_mixture.flatten()
 
-        sums[codes1, codes2, codes_mixture] += 1
+        assert len(codes) == NUM_SOURCES
+
+        # NOTE: this is hardcoded because i don't know how to do it dynamically
+        # TODO: in the paper they say they permute the codes in order to have commutativity, but I cannot find this in the code
+        sums[codes[0], codes[1], codes[2], codes_mixture] += 1
+
         step += 1
     return step
 
 
 def evaluate(data_loader, sums, model, args, writer, step):
     sums_test = sums / (torch.sum(sums) + 1e-16)
+    batch_size = 16
     with torch.no_grad():
         loss = 0.0
-        for images, _ in data_loader:
+        for images, _ in tqdm(data_loader, desc="Evaluating sums"):
             images = images.to(args.device)
-            images1 = images[: 16 // 2]
-            images2 = images[16 // 2:]
-            images_mixture = 0.5 * images1 + 0.5 * images2
+            sources_images = split_images_by_step(
+                images, batch_size, step=NUM_SOURCES)
+            images_mixture = torch.mean(torch.stack(sources_images), dim=0)
 
             with torch.no_grad():
-                _, z_e_x1, _ = model(images1)
-                _, z_e_x2, _ = model(images2)
+                z_e_xs = []
+                for images in sources_images:
+                    _, z_e_x, _ = model(images)
+                    z_e_xs.append(z_e_x)
                 _, z_e_x_mixture, _ = model(images_mixture)
-                codes1 = model.codeBook(z_e_x1)
-                codes2 = model.codeBook(z_e_x2)
+                codes: List[torch.Tensor] = [
+                    model.codeBook(z_e_x) for z_e_x in z_e_xs]
+
+                assert len(codes) == NUM_SOURCES
+
                 codes_mixture = model.codeBook(z_e_x_mixture)
+
+                # NOTE: this is hardcoded because i don't know how to do it dynamically
                 loss += torch.mean(-torch.log(
-                    sums_test[codes1, codes2, codes_mixture] + 1e-16))
+                    sums_test[codes[0], codes[1], codes[2], codes_mixture] + 1e-16))
 
         loss /= len(data_loader)
     # Logs
@@ -76,7 +107,7 @@ class SumsEstimationConfig:
             "_self_",
         ]
     )
-    vqvae_checkpoint: str = MISSING
+    vqvae_checkpoint: str = "lass_mnist/checkpoints/vqvae/256-sigmoid-big.pt"
     num_codes: int = MISSING
     batch_size: int = 64
     num_epochs: int = 500
@@ -89,7 +120,7 @@ CONFIG_STORE.store(group="sums_estimation",
                    name="base_sums_estimation", node=SumsEstimationConfig)
 
 
-@hydra.main(version_base=None, config_path=CONFIG_DIR)
+@hydra.main(version_base=None, config_path=CONFIG_DIR, config_name="sums_estimation/mnist.yaml")
 def main(cfg):
     cfg: SumsEstimationConfig = cfg.sums_estimation
     now = datetime.now()
@@ -123,7 +154,8 @@ def main(cfg):
 
     # Fixed images for TensorBoard
     fixed_images, _ = next(iter(test_loader))
-    fixed_grid = make_grid(fixed_images, nrow=8, range=(-1, 1), normalize=True)
+    fixed_grid = make_grid(fixed_images, nrow=8,
+                           value_range=(-1, 1), normalize=True)
     writer.add_image("original", fixed_grid, 0)
 
     # load vqvae
@@ -135,12 +167,14 @@ def main(cfg):
     for param in model.parameters():
         param.requires_grad = False
 
-    sums = torch.zeros(cfg.num_codes, cfg.num_codes,
-                       cfg.num_codes).to(cfg.device)
+    sums = torch.zeros(
+        tuple(cfg.num_codes for _ in range(NUM_SOURCES + 1))).to(cfg.device)
+
+    assert sums.shape == tuple(cfg.num_codes for _ in range(NUM_SOURCES + 1))
 
     step = 0
     best_loss = -1.0
-    for epoch in range(cfg.num_epochs):
+    for epoch in tqdm(range(cfg.num_epochs), desc="Training sums epochs"):
         step = train(train_loader, sums, model, cfg, writer, step)
         loss = evaluate(test_loader, sums, model, cfg, writer, step)
 
@@ -149,8 +183,8 @@ def main(cfg):
 
         if (epoch == 0) or (loss < best_loss):
             best_loss = loss
-            with open("{0}/best.pt".format(save_filename), "wb") as f:
-                torch.save(sums, f)
+            model_path = f"./best.pt"
+            torch.save(sums.to_sparse(), model_path)
 
     now = datetime.now()
     current_time = now.strftime("%H:%M:%S")

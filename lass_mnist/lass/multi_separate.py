@@ -18,7 +18,7 @@ from torchvision.utils import save_image
 import numpy as np
 import random
 
-from diba.diba.factor_graph_v4 import FactorGraph
+from diba.diba.factor_graph_v4 import FactorGraph, separate
 
 from ..modules import VectorQuantizedVAE
 from .utils import refine_latents, CONFIG_DIR, ROOT_DIR, CONFIG_STORE
@@ -124,10 +124,7 @@ def generate_samples(
     for bi in tqdm.tqdm(range(batch_size), desc="separating"):
         mixture = torch.tensor(codes_mixture[bi])
 
-        factor_graph = FactorGraph(
-            num_sources=2, mixture=mixture, likelihood=likelihood, transformer=transformer)
-
-        z0, z1 = factor_graph.separate()
+        z0, z1 = separate(mixture, likelihood, transformer)
 
         (x0, x1), (x0lat, x1lat), _ = select_closest_to_mixture(
             vqvae=model,
@@ -182,9 +179,9 @@ class EvaluateSeparationConfig:
 
     latent_length: int = MISSING
     vocab_size: int = MISSING
-    # batch_size: int = 64
+    batch_size: int = 64
     # TODO: change it back to 64
-    batch_size: int = 1
+    # batch_size: int = 1
     class_conditioned: bool = False
     num_workers: int = mp.cpu_count() - 1
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -272,15 +269,15 @@ def main(cfg):
 
         gtm = (gt1 + gt2) / 2.0
 
-        # print(f"Refining latents for batch {i}")
-        # gen1, gen2 = refine_latents(
-        #     model,
-        #     gen1lat,
-        #     gen2lat,
-        #     gtm,
-        #     n_iterations=500,
-        #     learning_rate=1e-1,
-        # )
+        print(f"Refining latents for batch {i}")
+        gen1, gen2 = refine_latents(
+            model,
+            gen1lat,
+            gen2lat,
+            gtm,
+            n_iterations=500,
+            learning_rate=1e-1,
+        )
 
         for j in range(len(gen1)):
             img_idx = i * cfg.batch_size + j
