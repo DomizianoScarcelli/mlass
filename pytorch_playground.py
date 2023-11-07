@@ -1,5 +1,7 @@
 import torch
 
+from diba.diba.sparse_utils import slice_along_index
+
 torch.set_printoptions(precision=2, sci_mode=False)
 num_tokens = 3
 num_sources = 2
@@ -122,5 +124,96 @@ def test_4():
     print(f"Sum messages is {sum_messages} with shape {sum_messages.shape}")
 
 
+def test_sparse_normalization():
+    dummy_tensor = torch.zeros(size=(3, 3, 3, 3))
+    random_indices = torch.tensor([[1, 2, 0, 2],
+                                   [1, 2, 0, 0],
+                                   [1, 2, 1, 1],
+                                   [2, 0, 2, 0],
+                                   [1, 2, 0, 0],
+                                   [2, 0, 2, 0],
+                                   [2, 1, 2, 1],
+                                   [0, 1, 2, 2],
+                                   [2, 1, 2, 0],
+                                   [0, 1, 2, 2]])
+
+    print(random_indices)
+    dummy_tensor[random_indices[0], random_indices[1],
+                 random_indices[2], random_indices[3]] = 1
+
+    dense_normalization = torch.sum(dummy_tensor, dim=-1)
+    dense_mask = dense_normalization != 0.0
+    dummy_tensor[dense_mask] = dummy_tensor[dense_mask] / \
+        dense_normalization[dense_mask].unsqueeze(-1)
+
+    print(f"Dense tensor normalized is {dummy_tensor}")
+    print(
+        f"Dense tensor normalized converted to sparse is {dummy_tensor.to_sparse()}")
+
+    sparse_tensor = dummy_tensor.to_sparse()
+    sparse_normalization = torch.sparse.sum(sparse_tensor, dim=-1)
+
+    print(f"Sparse normalization is {sparse_normalization}")
+
+    sparse_tensor = sparse_tensor.coalesce()
+    sparse_normalization = sparse_normalization.coalesce()
+    normalized_indices = []
+    normalized_values = []
+    for i, index in enumerate(sparse_normalization.indices()):
+        normalized_indices.append(index)
+        normalized_value = sparse_tensor[index[0], index[1],
+                                         index[2]] / sparse_normalization.values()[i]
+
+        print(f"Normalized value for index {index} is {normalized_value}")
+        normalized_values.append(normalized_value)
+
+    print(f'Normalized indices are {normalized_indices}')
+    print(f'Normalized values are {normalized_values}')
+
+    normalized_sparse_tensor = torch.sparse_coo_tensor(
+        torch.cat(normalized_indices),
+        torch.cat(normalized_values),
+        sparse_tensor.shape,
+    )
+
+    assert normalized_sparse_tensor == dummy_tensor.to_sparse()
+
+
+def test_sparse_slicing():
+    dummy_tensor = torch.zeros(size=(3, 3, 3, 3))
+    random_indices = torch.tensor([[1, 2, 0, 2],
+                                   [1, 2, 0, 0],
+                                   [1, 2, 1, 1],
+                                   [2, 0, 2, 0],
+                                   [1, 2, 0, 0],
+                                   [2, 0, 2, 0],
+                                   [2, 1, 2, 1],
+                                   [0, 1, 2, 2],
+                                   [2, 1, 2, 0],
+                                   [0, 1, 2, 2]])
+
+    print(random_indices)
+    dummy_tensor[random_indices[0], random_indices[1],
+                 random_indices[2], random_indices[3]] = 1
+
+    slice_index = 2
+    sliced_tensor = dummy_tensor[:, :, slice_index]
+    print(f"Sliced tensor is {sliced_tensor}")
+
+    sparse_tensor = dummy_tensor.to_sparse()
+    print(f"Sparse tensor is {sparse_tensor}")
+
+    sliced_sparse_tensor = slice_along_index(
+        sparse_tensor, slice_index
+    )
+
+    print(f"Sparse tensor is {sparse_tensor}")
+
+    assert torch.allclose(sliced_tensor, sliced_sparse_tensor.to_dense()), f"""
+    sliced_tensor is {sliced_tensor}
+    sliced_sparse_tensor to dense is {sliced_sparse_tensor.to_dense()}
+    """
+
+
 if __name__ == "__main__":
-    test_4()
+    test_sparse_slicing()

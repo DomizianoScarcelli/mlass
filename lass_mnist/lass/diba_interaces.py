@@ -8,6 +8,8 @@ from hydra.core.config_store import ConfigStore
 from diba.diba import Likelihood, SeparationPrior
 from transformers import GPT2LMHeadModel
 
+from diba.diba.sparse_utils import slice_along_index
+
 
 class UnconditionedTransformerPrior(SeparationPrior):
     def __init__(self, transformer: GPT2LMHeadModel, sos: int):
@@ -69,3 +71,16 @@ class DenseLikelihood(Likelihood):
             return self.sum
         mixture_slice = self.sum[:, :, token_idx]
         return torch.log(mixture_slice)
+
+
+class SparseLikelihood(Likelihood):
+    def __init__(self, sums: torch.Tensor):
+        # TODO: this sould be normalized, but I don't know how to do it on a sparse tensor
+        self.sum = sums
+
+    def get_tokens_count(self) -> int:
+        return self.sum.shape[0]
+
+    @functools.lru_cache(512)
+    def get_log_likelihood(self, token_idx: int) -> torch.Tensor:
+        return slice_along_index(self.sum, token_idx)

@@ -18,7 +18,7 @@ from torchvision.utils import save_image
 import numpy as np
 import random
 
-from diba.diba.factor_graph_v4 import FactorGraph, separate
+from diba.diba.naive_separation_v1 import FactorGraph, separate
 
 from ..modules import VectorQuantizedVAE
 from .utils import refine_latents, CONFIG_DIR, ROOT_DIR, CONFIG_STORE
