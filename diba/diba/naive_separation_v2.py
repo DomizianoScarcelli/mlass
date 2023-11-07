@@ -351,9 +351,13 @@ if __name__ == "__main__":
                             254, 26, 9, 168, 135, 210, 29, 26, 88, 222, 75, 210, 56, 56, 88, 4, 34, 80, 8, 56, 137, 75, 7, 41, 8, 56])
     # MIXTURE_LENGTH = 49
 
-    SUMS_CHECKPOINT_PATH = "lass_mnist/checkpoints/sum/sums_epoch_368.pt"
+    SUMS_CHECKPOINT_PATH = "lass_mnist/checkpoints/sum/sums_epoch_430.pt"\
+
+    print(f"Loading sparse sums")
     with open(SUMS_CHECKPOINT_PATH, 'rb') as f:
         sums = torch.load(f, map_location=torch.device('cpu'))
+
+    print(f"Sparse Likelihood is loaded and is {sums}")
 
     transformer_config = GPT2Config(
         vocab_size=256,
@@ -377,7 +381,10 @@ if __name__ == "__main__":
 
     likelihood = SparseLikelihood(sums=sums)
 
-    all_samples = separate(mixture=mixture, likelihood=likelihood,
-                           transformer=transformer, sources=3)
+    # all_samples = separate(mixture=mixture, likelihood=likelihood,
+    #                        transformer=transformer, sources=3)
 
-    log.debug(f"All samples are {all_samples} with shape {all_samples.shape}")
+    sliced_likelihood = likelihood.get_log_likelihood(mixture[0])
+    print(f"Sliced likelihood is {sliced_likelihood}")
+
+    # log.debug(f"All samples are {all_samples} with shape {all_samples.shape}")

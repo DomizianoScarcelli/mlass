@@ -215,5 +215,29 @@ def test_sparse_slicing():
     """
 
 
+def test_save_and_load_sparse():
+    dummy_tensor = torch.zeros(size=(3, 3, 3, 3))
+    random_indices = torch.tensor([[1, 2, 0, 2],
+                                   [1, 2, 0, 0],
+                                   [1, 2, 1, 1],
+                                   [2, 0, 2, 0],
+                                   [1, 2, 0, 0],
+                                   [2, 0, 2, 0],
+                                   [2, 1, 2, 1],
+                                   [0, 1, 2, 2],
+                                   [2, 1, 2, 0],
+                                   [0, 1, 2, 2]])
+
+    print(random_indices)
+    dummy_tensor[random_indices[0], random_indices[1],
+                 random_indices[2], random_indices[3]] = 1
+
+    torch.save(dummy_tensor.to_sparse(), "dummy.pt")
+
+    sparse_tensor: torch.Tensor = torch.load("dummy.pt")
+
+    print(f"Loaded sparse tensor is {sparse_tensor}")
+
+
 if __name__ == "__main__":
-    test_sparse_slicing()
+    test_save_and_load_sparse()
