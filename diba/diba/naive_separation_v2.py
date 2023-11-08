@@ -4,11 +4,15 @@ from typing import Dict, List, NamedTuple, Set, Tuple, Union
 import numpy as np
 import torch
 from tqdm import tqdm
+from diba.diba.utils import normalize_logits
+from torchvision.utils import save_image
 
 from lass_mnist.lass.diba_interaces import DenseLikelihood, SparseLikelihood, UnconditionedTransformerPrior
 from transformers import GPT2LMHeadModel, GPT2Config
 
 import logging
+
+from lass_mnist.lass.utils import ROOT_DIR
 
 
 """
@@ -327,20 +331,86 @@ class FactorGraph:
         return samples
 
 
-def separate(mixture: torch.Tensor, likelihood: DenseLikelihood, transformer: GPT2LMHeadModel, sources: int):
-    past = torch.tensor([[0], [0], [0]])
+# def separate(mixture: torch.Tensor, likelihood: DenseLikelihood, transformer: GPT2LMHeadModel, sources: int):
+#     past = torch.tensor([[0], [0], [0]])
+#     mixture_length = len(mixture)
+#     all_samples = past.detach().clone()
+#     for t in range(mixture_length - 1):
+#         factor_graph = FactorGraph(
+#             num_sources=sources, mixture_t=mixture[t], likelihood=likelihood, transformer=transformer, past_z=past)
+#         samples = factor_graph.sample()
+#         log.debug(
+#             f"Samples shape is {samples.shape}, while all_samples shape is {all_samples.shape}")
+#         all_samples = torch.cat((all_samples, samples), dim=1)
+#         log.debug(f"Past at time step {t} is {past}")
+#         past = all_samples
+#     return all_samples
+
+
+def sample(mixture_t: int, transformer: GPT2LMHeadModel, sources: int, past_z: torch.Tensor, partial_likelihoods: List[torch.Tensor]):
+    samples_t = []
+    for i in range(sources):
+        partial_likelihood = partial_likelihoods[i]
+
+        log_likelihood = partial_likelihood[:, mixture_t].view(-1)
+
+        assert not _check_if_nan_or_inf(log_likelihood), f"""
+        Log likelihood is nan or inf
+        Log likelihood is {log_likelihood}
+        """
+
+        prior = UnconditionedTransformerPrior(
+            transformer=transformer, sos=0)
+
+        log_prior, _ = prior.get_logits(
+            token_ids=past_z[i].view(1, -1).to(torch.long),
+            past_key_values=None,
+        )
+
+        log_prior = normalize_logits(log_prior).view(-1)
+
+        log_posterior = log_likelihood + log_prior
+
+        posterior = torch.softmax(log_posterior, dim=0)
+
+        K = 32
+        top_k_posterior, top_k_indices = torch.topk(
+            posterior, k=K, dim=0, sorted=True)
+
+        posterior = torch.zeros(posterior.shape)
+        posterior[top_k_indices] = top_k_posterior
+
+        sample = torch.multinomial(posterior, num_samples=1)
+
+        # samples_t.append(sample)
+        samples_t.append(torch.tensor([sample]))
+
+    return torch.stack(samples_t, dim=0)
+
+
+def separate(mixture: torch.Tensor, likelihood: SparseLikelihood, transformer: GPT2LMHeadModel, sources: int):
+    past = torch.tensor([[0] for _ in range(sources)])
     mixture_length = len(mixture)
     all_samples = past.detach().clone()
-    for t in range(mixture_length - 1):
-        factor_graph = FactorGraph(
-            num_sources=sources, mixture_t=mixture[t], likelihood=likelihood, transformer=transformer, past_z=past)
-        samples = factor_graph.sample()
-        log.debug(
-            f"Samples shape is {samples.shape}, while all_samples shape is {all_samples.shape}")
+    partial_likelihoods = []
+    for i in range(sources):
+        partial_likelihood = likelihood.get_marginal_likelihood(
+            source_idx=i)
+        partial_likelihoods.append(partial_likelihood)
+    for t in tqdm(range(mixture_length - 1), desc="Separation"):
+        samples = sample(mixture_t=mixture[t],
+                         transformer=transformer,
+                         sources=sources,
+                         past_z=past,
+                         partial_likelihoods=partial_likelihoods)
+
         all_samples = torch.cat((all_samples, samples), dim=1)
-        log.debug(f"Past at time step {t} is {past}")
-        past = all_samples
-    return all_samples
+        # print(f"Past at time step {t} is {past}")
+        past = all_samples.detach().clone()
+
+    print(
+        f"final all samples are {all_samples} with shape {all_samples.shape}")
+    return all_samples[0], all_samples[1], all_samples[2]
 
 
 if __name__ == "__main__":
@@ -351,13 +421,11 @@ if __name__ == "__main__":
                             254, 26, 9, 168, 135, 210, 29, 26, 88, 222, 75, 210, 56, 56, 88, 4, 34, 80, 8, 56, 137, 75, 7, 41, 8, 56])
     # MIXTURE_LENGTH = 49
 
-    SUMS_CHECKPOINT_PATH = "lass_mnist/checkpoints/sum/sums_epoch_430.pt"\
+    SUMS_CHECKPOINT_PATH = "lass_mnist/checkpoints/sum/3_sources_sums_epoch_430.pt"
 
     print(f"Loading sparse sums")
     with open(SUMS_CHECKPOINT_PATH, 'rb') as f:
         sums = torch.load(f, map_location=torch.device('cpu'))
-
-    print(f"Sparse Likelihood is loaded and is {sums}")
 
     transformer_config = GPT2Config(
         vocab_size=256,
@@ -384,7 +452,15 @@ if __name__ == "__main__":
     # all_samples = separate(mixture=mixture, likelihood=likelihood,
     #                        transformer=transformer, sources=3)
 
-    sliced_likelihood = likelihood.get_log_likelihood(mixture[0])
-    print(f"Sliced likelihood is {sliced_likelihood}")
+    # sliced_likelihood = likelihood.get_log_likelihood(mixture[0])
+
+    result_dir = ROOT_DIR / "multi-separated-images"
+
+    z1, z2, z3 = separate(mixture=mixture, likelihood=likelihood,
+                          transformer=transformer, sources=3)
+
+    # save_image(z1, result_dir / f"sep/{0}-1.png")
+    # save_image(z2, result_dir / f"sep/{1}-2.png")
+    # save_image(z2, result_dir / f"sep/{2}-2.png")
 
     # log.debug(f"All samples are {all_samples} with shape {all_samples.shape}")

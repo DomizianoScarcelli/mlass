@@ -1,6 +1,7 @@
 import torch
 
 from diba.diba.sparse_utils import slice_along_index
+from lass_mnist.lass.diba_interaces import SparseLikelihood
 
 torch.set_printoptions(precision=2, sci_mode=False)
 num_tokens = 3
@@ -239,5 +240,14 @@ def test_save_and_load_sparse():
     print(f"Loaded sparse tensor is {sparse_tensor}")
 
 
+def test_sparse_likelihood_normalization():
+    SUMS_CHECKPOINT_PATH = "lass_mnist/checkpoints/sum/256-sigmoid-big.pt"
+
+    with open(SUMS_CHECKPOINT_PATH, 'rb') as f:
+        sums: torch.Tensor = torch.load(f, map_location=torch.device('cpu'))
+
+    likelihood = SparseLikelihood(sums=sums.to_sparse_coo())
+
+
 if __name__ == "__main__":
-    test_save_and_load_sparse()
+    test_sparse_likelihood_normalization()

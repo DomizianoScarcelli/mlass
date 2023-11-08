@@ -29,7 +29,7 @@ from numpy.random import default_rng
 from torch.utils.data import Dataset
 
 
-class PairsDataset(Dataset):
+class TripletsDataset(Dataset):
     def __init__(self, dataset: Sequence, seed: int = 0):
         super().__init__()
         self._rng = default_rng(seed=seed)
@@ -42,7 +42,8 @@ class PairsDataset(Dataset):
     def __getitem__(self, item):
         data1 = self._dataset[item]
         data2 = self._dataset[self._data_permutation[item]]
-        return dict(first=data1, second=data2)
+        data3 = self._dataset[self._data_permutation[self._data_permutation[item]]]
+        return dict(first=data1, second=data2, third=data3)
 
 
 def seed_worker(worker_id):
@@ -55,40 +56,26 @@ def psnr_grayscale(target, preds, reduction="elementwise_mean", dim=None):
     return torchmetrics.functional.peak_signal_noise_ratio(preds, target, data_range=1.0, reduction=reduction, dim=dim)
 
 
-def batched_psnr_unconditional(gts: List[torch.Tensor], gens: List[torch.Tensor]) -> float:
-    (gt1, gt2), (gen1, gen2) = gts, gens
-    dims = list(range(1, len(gt1.shape)))
-    batched_psnr_12 = (
-        0.5 * psnr_grayscale(gt1, gen1, reduction=None, dim=dims) +
-        0.5 * psnr_grayscale(gt2, gen2, reduction=None, dim=dims)
-    )
-
-    batched_psnr_21 = (
-        0.5 * psnr_grayscale(gt1, gen2, reduction=None, dim=dims) +
-        0.5 * psnr_grayscale(gt2, gen1, reduction=None, dim=dims)
-    )
-
-    bpsnr = torch.stack([batched_psnr_12, batched_psnr_21], dim=-1)
-    bpsnr_max, _ = bpsnr.max(dim=-1)
-    return bpsnr_max.mean(dim=0).item()
-
-
 def select_closest_to_mixture(
         vqvae: VectorQuantizedVAE,
         gen1: torch.LongTensor,
         gen2: torch.LongTensor,
+        gen3: torch.LongTensor,
         gt_mixture: torch.Tensor,
 ):
     gen1_o = vqvae.codes_to_latents(gen1).detach().clone()
     gen2_o = vqvae.codes_to_latents(gen2).detach().clone()
+    gen3_o = vqvae.codes_to_latents(gen3).detach().clone()
 
     # SELECT BEST
     geni1 = vqvae.decode_latents(gen1_o).detach().clone()
     geni2 = vqvae.decode_latents(gen2_o).detach().clone()
+    geni3 = vqvae.decode_latents(gen3_o).detach().clone()
 
-    rec_error = ((gt_mixture - (geni1 + geni2) * 0.5) ** 2).sum([1, 2, 3])
+    rec_error = ((gt_mixture - (geni1 + geni2 + geni3) * (1/3))
+                 ** 2).sum([1, 2, 3])
     sel = rec_error.argmin()
-    return (geni1[sel], geni2[sel]), (gen1_o[sel], gen2_o[sel]), sel
+    return (geni1[sel], geni2[sel], geni3[sel]), (gen1_o[sel], gen2_o[sel], gen3_o[sel]), sel
 
 
 @torch.no_grad()
@@ -100,8 +87,8 @@ def generate_samples(
     bos: Tuple[int, int],
     latent_length: int,
 ):
-    gt1, gt2 = gts
-    gtm = 0.5 * gt1 + 0.5 * gt2
+    gt1, gt2, gt3 = gts
+    gtm = (1/3) * gt1 + (1/3) * gt2 + (1/3) * gt3
 
     # check input shape
     assert gt1.shape == gt2.shape
@@ -112,42 +99,42 @@ def generate_samples(
     codes_mixture = codes_mixture.view(
         batch_size, latent_length ** 2).tolist()  # (B, H**2)
 
-    label0, label1 = bos
-    p0 = UnconditionedTransformerPrior(transformer=transformer, sos=label0)
-    p1 = UnconditionedTransformerPrior(transformer=transformer, sos=label1)
+    likelihood = SparseLikelihood(sums=sums)
 
-    # likelihood = DenseLikelihood(sums=sums)
-    likelihood = SparseLikelihood(sums=sums.to_sparse())
-
-    gen1ims, gen2ims = [], []
-    gen1lats, gen2lats = [], []
+    gen1ims, gen2ims, gen3ims = [], [], []
+    gen1lats, gen2lats, gen3lats = [], [], []
 
     for bi in tqdm.tqdm(range(batch_size), desc="separating"):
         mixture = torch.tensor(codes_mixture[bi])
 
-        z0, z1 = separate(
-            mixture=mixture, likelihood=likelihood, transformer=transformer, sources=2)
+        z0, z1, z3 = separate(
+            mixture=mixture, likelihood=likelihood, transformer=transformer, sources=3)
 
-        (x0, x1), (x0lat, x1lat), _ = select_closest_to_mixture(
+        (x0, x1, x2), (x0lat, x1lat, x2lat), _ = select_closest_to_mixture(
             vqvae=model,
             gen1=z0.reshape(-1, latent_length, latent_length),
             gen2=z1.reshape(-1, latent_length, latent_length),
+            gen3=z3.reshape(-1, latent_length, latent_length),
             gt_mixture=gtm[bi:bi+1],
         )
 
         gen1ims.append(x0)
         gen2ims.append(x1)
+        gen3ims.append(x2)
         gen1lats.append(x0lat)
         gen2lats.append(x1lat)
+        gen3lats.append(x2lat)
 
     # Shapes are: torch.Size([2, (1), 1, 28, 28]), torch.Size([2, (1), 1, 28, 28]), torch.Size([2, (1), 128, 7, 7]), torch.Size([2, (1), 128, 7, 7])
     # the (1) means that the size has been squeezed
     gen1im = torch.stack(gen1ims, dim=0).squeeze(1)
     gen2im = torch.stack(gen2ims, dim=0).squeeze(1)
+    gen3im = torch.stack(gen3ims, dim=0).squeeze(1)
     gen1lat = torch.stack(gen1lats, dim=0).squeeze(1)
     gen2lat = torch.stack(gen2lats, dim=0).squeeze(1)
+    gen3lat = torch.stack(gen3lats, dim=0).squeeze(1)
 
-    return (gen1im, gen2im), (gen1lat, gen2lat)
+    return (gen1im, gen2im, gen3im), (gen1lat, gen2lat, gen3lat)
 
 
 @dataclass
@@ -181,7 +168,7 @@ class EvaluateSeparationConfig:
 
     latent_length: int = MISSING
     vocab_size: int = MISSING
-    batch_size: int = 64
+    batch_size: int = 1
     # TODO: change it back to 64
     # batch_size: int = 4
     class_conditioned: bool = False
@@ -210,7 +197,7 @@ def main(cfg):
     assert isinstance(transformer, PreTrainedModel)
 
     # create output directory
-    result_dir = ROOT_DIR / "multi-separated-images"
+    result_dir = ROOT_DIR / "three-separated-images"
     if result_dir.exists():
         shutil.rmtree(result_dir)
 
@@ -223,7 +210,7 @@ def main(cfg):
 
     # Define the data loaders
     test_loader = torch.utils.data.DataLoader(
-        PairsDataset(test_set, seed=100),
+        TripletsDataset(test_set, seed=100),
         num_workers=cfg.num_workers,
         batch_size=cfg.batch_size,
         shuffle=False,
@@ -237,7 +224,8 @@ def main(cfg):
     with open(cfg.checkpoints.autoregressive, 'rb') as f:
         transformer.load_state_dict(torch.load(f, map_location=cfg.device))
 
-    with open(cfg.checkpoints.sums, 'rb') as f:
+    SUMS_CHECKPOINT_PATH = "lass_mnist/checkpoints/sum/3_sources_sums_epoch_430.pt"
+    with open(SUMS_CHECKPOINT_PATH, 'rb') as f:
         sums = torch.load(f, map_location=cfg.device)
 
     # set models to eval
@@ -253,24 +241,27 @@ def main(cfg):
 
         gt1, labels1 = batch["first"]
         gt2, labels2 = batch["second"]
+        gt3, labels3 = batch["third"]
 
         # prepare the data
         gt1 = gt1.to(cfg.device)
         gt2 = gt2.to(cfg.device)
+        gt3 = gt3.to(cfg.device)
 
         labels1 = labels1 if cfg.class_conditioned else uncond_bos
         labels2 = labels2 if cfg.class_conditioned else uncond_bos
+        labels3 = labels3 if cfg.class_conditioned else uncond_bos
 
-        (gen1, gen2), (gen1lat, gen2lat) = generate_samples(
+        (gen1, gen2, gen3), (gen1lat, gen2lat, gen3lat) = generate_samples(
             model=model,
             transformer=transformer,
             sums=sums,
-            gts=[gt1, gt2],
-            bos=[labels1, labels2],
+            gts=[gt1, gt2, gt3],
+            bos=[labels1, labels2, labels3],
             latent_length=cfg.latent_length,
         )
 
-        gtm = (gt1 + gt2) / 2.0
+        gtm = (gt1 + gt2 + gt3) / 3.0
 
         # print(f"Refining latents for batch {i}")
         # gen1, gen2 = refine_latents(
@@ -286,8 +277,10 @@ def main(cfg):
             img_idx = i * cfg.batch_size + j
             save_image(gen1[j], result_dir / f"sep/{img_idx}-1.png")
             save_image(gen2[j], result_dir / f"sep/{img_idx}-2.png")
+            save_image(gen3[j], result_dir / f"sep/{img_idx}-3.png")
             save_image(gt1[j], result_dir / f"ori/{img_idx}-1.png")
             save_image(gt2[j],  result_dir / f"ori/{img_idx}-2.png")
+            save_image(gt3[j],  result_dir / f"ori/{img_idx}-3.png")
 
 
 if __name__ == '__main__':

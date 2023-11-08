@@ -75,8 +75,62 @@ class DenseLikelihood(Likelihood):
 
 class SparseLikelihood(Likelihood):
     def __init__(self, sums: torch.Tensor):
-        # TODO: this sould be normalized, but I don't know how to do it on a sparse tensor
-        self.sum = sums
+        # TODO: the normalization now is done on dense tensors, but should be done on sparse tensors directly
+
+        # Dense sums normalized
+        normalization = torch.sparse.sum(sums, dim=-1)
+        dense_normalization = normalization.to_dense()
+        dense_mask = dense_normalization != 0.0
+        dense_sums = sums.to_dense()
+        dense_sums[dense_mask] = (dense_sums[dense_mask] /
+                                  dense_normalization[dense_mask].unsqueeze(-1))
+        self.sum = dense_sums.to_sparse()
+
+        # # TODO: Sparse sums normalized
+        # # Create a mask for non-zero sums to avoid division by zero
+        # normalization = normalization.unsqueeze(-1)
+        # non_zero_indices = normalization._indices()
+        # non_zero_values = normalization._values()
+
+        # # Norm values are tensor([[    0.57,     0.39,     0.32,  ...,     0.02,     0.03,     0.03],
+        # # [    0.57,     0.00,     0.01,  ...,     0.00,     0.00,     0.03]])
+
+        # print(f"Sums indices have shape {sums._indices().shape}")
+        # print(f"non_zero_indices have shaep {non_zero_indices.shape}")
+
+        # indices_to_normalize = sums._indices(
+        # )[non_zero_indices]
+
+        # print(f"Indices to normalize are {indices_to_normalize}")
+
+        # norm_values = sums._values().t()[indices_to_normalize] / \
+        #     non_zero_values.unsqueeze(-1)
+
+        # print(
+        #     f"Norm values are {norm_values}, the indices have shape {non_zero_indices.shape} and the values have shape {non_zero_values.shape}")
+        # print(f"Dense sums non zero are {dense_sums[dense_sums != 0.0]}")
+
+        # new_values = sums._values().detach().clone()
+        # new_values[non_zero_indices] = norm_values
+
+        # print(f"New values shape is {new_values.shape}")
+        # print(f"New values are {new_values}")
+        # sums = torch.sparse_coo_tensor(
+        #     sums._indices(), new_values, sums.shape)
+
+        # assert torch.allclose(torch.nonzero(
+        #     dense_sums), torch.nonzero(sums.to_dense()))
+
+        # assert torch.allclose(sums.to_dense(), dense_sums), f"""
+        #     Dense sums are not equal to sparse sums
+        #     Dense sums: {dense_sums} with shape {dense_sums.shape}
+        #     Sparse sums: {sums.to_dense()} with shape {sums.to_dense().shape}
+        #     There are a total of different {torch.sum(dense_sums != sums.to_dense())} elements out of non zero elements {torch.sum(dense_sums != 0.0)}
+        #     The non zero elements for the dense sums are at indices {torch.nonzero(dense_sums)}
+        #     The non zero elements for the sparse sums are at indices {torch.nonzero(sums.to_dense())}
+        # """
+
+        self.num_sources = len(self.sum.shape) - 1
 
     def get_tokens_count(self) -> int:
         return self.sum.shape[0]
@@ -84,3 +138,10 @@ class SparseLikelihood(Likelihood):
     @functools.lru_cache(512)
     def get_log_likelihood(self, token_idx: int) -> torch.Tensor:
         return slice_along_index(self.sum, token_idx)
+
+    def get_marginal_likelihood(self, source_idx: int) -> torch.Tensor:
+        sum_dims = tuple(i for i in range(self.num_sources) if i != source_idx)
+        dense_marginal = torch.sparse.sum(
+            self.sum, dim=sum_dims).to_dense()
+
+        return torch.log(dense_marginal + 1e-25)
