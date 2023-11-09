@@ -21,7 +21,7 @@ import random
 from diba.diba.naive_separation_v2 import separate
 
 from ..modules import VectorQuantizedVAE
-from .utils import refine_latents, CONFIG_DIR, ROOT_DIR, CONFIG_STORE
+from .utils import refine_latents, CONFIG_DIR, ROOT_DIR, CONFIG_STORE, refine_latents_three
 from .diba_interaces import SparseLikelihood, UnconditionedTransformerPrior, DenseLikelihood
 import multiprocessing as mp
 from typing import Sequence
@@ -53,7 +53,53 @@ def seed_worker(worker_id):
 
 
 def psnr_grayscale(target, preds, reduction="elementwise_mean", dim=None):
-    return torchmetrics.functional.peak_signal_noise_ratio(preds, target, data_range=1.0, reduction=reduction, dim=dim)
+    return torchmetrics.functional.peak_signal_noise_ratio(
+        preds, target, data_range=1.0, reduction=reduction, dim=dim)
+
+
+def batched_psnr_unconditional(gts: List[torch.Tensor], gens: List[torch.Tensor]) -> float:
+    (gt1, gt2, gt3), (gen1, gen2, gen3) = gts, gens
+    dims = list(range(1, len(gt1.shape)))
+    batched_psnr_12 = (
+        (1/3) * psnr_grayscale(gt1, gen1, reduction=None, dim=dims) +
+        (1/3) * psnr_grayscale(gt2, gen2, reduction=None, dim=dims) +
+        (1/3) * psnr_grayscale(gt3, gen3, reduction=None, dim=dims)
+    )
+
+    batched_psnr_21 = (
+        (1/3) * psnr_grayscale(gt1, gen2, reduction=None, dim=dims) +
+        (1/3) * psnr_grayscale(gt2, gen3, reduction=None, dim=dims) +
+        (1/3) * psnr_grayscale(gt3, gen1, reduction=None, dim=dims)
+    )
+
+    batched_psnr_32 = (
+        (1/3) * psnr_grayscale(gt1, gen3, reduction=None, dim=dims) +
+        (1/3) * psnr_grayscale(gt2, gen1, reduction=None, dim=dims) +
+        (1/3) * psnr_grayscale(gt3, gen2, reduction=None, dim=dims)
+    )
+
+    batched_psnr_31 = (
+        (1/3) * psnr_grayscale(gt1, gen3, reduction=None, dim=dims) +
+        (1/3) * psnr_grayscale(gt2, gen2, reduction=None, dim=dims) +
+        (1/3) * psnr_grayscale(gt3, gen1, reduction=None, dim=dims)
+    )
+
+    batched_psnr_13 = (
+        (1/3) * psnr_grayscale(gt1, gen1, reduction=None, dim=dims) +
+        (1/3) * psnr_grayscale(gt2, gen3, reduction=None, dim=dims) +
+        (1/3) * psnr_grayscale(gt3, gen2, reduction=None, dim=dims)
+    )
+
+    batched_psnr_23 = (
+        (1/3) * psnr_grayscale(gt1, gen2, reduction=None, dim=dims) +
+        (1/3) * psnr_grayscale(gt2, gen1, reduction=None, dim=dims) +
+        (1/3) * psnr_grayscale(gt3, gen3, reduction=None, dim=dims)
+    )
+
+    bpsnr = torch.stack(
+        [batched_psnr_12, batched_psnr_21, batched_psnr_32, batched_psnr_31, batched_psnr_13, batched_psnr_23], dim=-1)
+    bpsnr_max, _ = bpsnr.max(dim=-1)
+    return bpsnr_max.mean(dim=0).item()
 
 
 def select_closest_to_mixture(
@@ -72,7 +118,7 @@ def select_closest_to_mixture(
     geni2 = vqvae.decode_latents(gen2_o).detach().clone()
     geni3 = vqvae.decode_latents(gen3_o).detach().clone()
 
-    rec_error = ((gt_mixture - (geni1 + geni2 + geni3) * (1/3))
+    rec_error = ((gt_mixture - ((geni1 + geni2 + geni3) / 3))
                  ** 2).sum([1, 2, 3])
     sel = rec_error.argmin()
     return (geni1[sel], geni2[sel], geni3[sel]), (gen1_o[sel], gen2_o[sel], gen3_o[sel]), sel
@@ -88,7 +134,7 @@ def generate_samples(
     latent_length: int,
 ):
     gt1, gt2, gt3 = gts
-    gtm = (1/3) * gt1 + (1/3) * gt2 + (1/3) * gt3
+    gtm = (gt1 + gt2 + gt3) / 3.0
 
     # check input shape
     assert gt1.shape == gt2.shape
@@ -107,14 +153,14 @@ def generate_samples(
     for bi in tqdm.tqdm(range(batch_size), desc="separating"):
         mixture = torch.tensor(codes_mixture[bi])
 
-        z0, z1, z3 = separate(
+        z0, z1, z2 = separate(
             mixture=mixture, likelihood=likelihood, transformer=transformer, sources=3)
 
         (x0, x1, x2), (x0lat, x1lat, x2lat), _ = select_closest_to_mixture(
             vqvae=model,
             gen1=z0.reshape(-1, latent_length, latent_length),
             gen2=z1.reshape(-1, latent_length, latent_length),
-            gen3=z3.reshape(-1, latent_length, latent_length),
+            gen3=z2.reshape(-1, latent_length, latent_length),
             gt_mixture=gtm[bi:bi+1],
         )
 
@@ -168,7 +214,7 @@ class EvaluateSeparationConfig:
 
     latent_length: int = MISSING
     vocab_size: int = MISSING
-    batch_size: int = 1
+    batch_size: int = 4
     # TODO: change it back to 64
     # batch_size: int = 4
     class_conditioned: bool = False
@@ -236,6 +282,7 @@ def main(cfg):
 
     print("Start separation")
 
+    psnrs = []
     # main separation loop
     for i, batch in enumerate(tqdm.tqdm(test_loader)):
 
@@ -262,16 +309,21 @@ def main(cfg):
         )
 
         gtm = (gt1 + gt2 + gt3) / 3.0
+        psnr = batched_psnr_unconditional(
+            gts=[gt1, gt2, gt3], gens=[gen1, gen2, gen3])
+        print(
+            f"The psnr before refining for batch {i} is {psnr}")
 
-        # print(f"Refining latents for batch {i}")
-        # gen1, gen2 = refine_latents(
-        #     model,
-        #     gen1lat,
-        #     gen2lat,
-        #     gtm,
-        #     n_iterations=500,
-        #     learning_rate=1e-1,
-        # )
+        print(f"Refining latents for batch {i}")
+        gen1, gen2, gen3 = refine_latents_three(
+            model,
+            gen1lat,
+            gen2lat,
+            gen3lat,
+            gtm,
+            n_iterations=500,
+            learning_rate=1e-1,
+        )
 
         for j in range(len(gen1)):
             img_idx = i * cfg.batch_size + j
@@ -281,6 +333,14 @@ def main(cfg):
             save_image(gt1[j], result_dir / f"ori/{img_idx}-1.png")
             save_image(gt2[j],  result_dir / f"ori/{img_idx}-2.png")
             save_image(gt3[j],  result_dir / f"ori/{img_idx}-3.png")
+
+        psnr = batched_psnr_unconditional(
+            gts=[gt1, gt2, gt3], gens=[gen1, gen2, gen3])
+        print(
+            f"The psnr for batch {i} is {psnr}")
+        psnrs.append(psnr)
+
+    print(f"Final psnr is {np.mean(psnrs)}")
 
 
 if __name__ == '__main__':

@@ -1,3 +1,4 @@
+import time
 import torch
 
 from diba.diba.sparse_utils import slice_along_index
@@ -249,5 +250,38 @@ def test_sparse_likelihood_normalization():
     likelihood = SparseLikelihood(sums=sums.to_sparse_coo())
 
 
+def timeit(func):
+    def wrapper(*args, **kwargs):
+        import time
+        start = time.time()
+        result = func(*args, **kwargs)
+        end = time.time()
+        print(f"Function {func.__name__} took {end - start} seconds")
+        return result
+    return wrapper
+
+
+@timeit
+def test_sum_complexity():
+    import time
+    dummy_tensor = torch.randn(size=(150, 150, 150, 150))
+    # start = time.time()
+    # torch.sum(dummy_tensor, dim=(0, 1, 2))
+    # end = time.time()
+    # print(f"Sum over batched 3 dims took {end - start} seconds")
+
+    start = time.time()
+    summed = torch.sum(dummy_tensor, dim=2)
+    summed = torch.sum(summed, dim=1)
+    summed = torch.sum(summed, dim=0)
+    end = time.time()
+    print(f"Sum over 3 dims took {end - start} seconds")
+
+    start = time.time()
+    torch.sum(dummy_tensor, dim=(0, 1))
+    end = time.time()
+    print(f"Sum over 2 dims took {end - start} seconds")
+
+
 if __name__ == "__main__":
-    test_sparse_likelihood_normalization()
+    test_sum_complexity()

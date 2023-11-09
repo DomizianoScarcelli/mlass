@@ -321,12 +321,6 @@ def _ancestral_sample(
         # x_0 at t=45 is tensor([255, 255, 255, 255, 255, 255, 255, 255, 255, 255]) with shape torch.Size([10])
         # x_1 at t=45 is tensor([653, 653, 653, 653, 653, 653, 653, 653, 653, 653]) with shape torch.Size([10])
 
-        print(
-            f"Log pos sum at t={sample_t} is: {log_post_sum} with shape {log_post_sum.shape}")
-
-        print(f"x_0 at t={sample_t} is {x_0} with shape {x_0.shape}")
-        print(f"x_1 at t={sample_t} is {x_1} with shape {x_1.shape}")
-
     result_0, result_1 = xs_0[:num_current_beams,
                               1:], xs_1[:num_current_beams, 1:]
 

@@ -4,7 +4,7 @@ defaults:
     - override /dataset: test_mnist
     - override /vqvae: mnist_256
     - override /autoregressive: mnist_256
-    - override /separation_method: general
+    - override /separation_method: sampling
 
 checkpoints:
     vqvae: lass_mnist/checkpoints/vqvae/256-sigmoid-big.pt

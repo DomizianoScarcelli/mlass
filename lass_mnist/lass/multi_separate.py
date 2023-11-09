@@ -52,7 +52,8 @@ def seed_worker(worker_id):
 
 
 def psnr_grayscale(target, preds, reduction="elementwise_mean", dim=None):
-    return torchmetrics.functional.peak_signal_noise_ratio(preds, target, data_range=1.0, reduction=reduction, dim=dim)
+    return torchmetrics.functional.peak_signal_noise_ratio(
+        preds, target, data_range=1.0, reduction=reduction, dim=dim)
 
 
 def batched_psnr_unconditional(gts: List[torch.Tensor], gens: List[torch.Tensor]) -> float:
@@ -88,6 +89,7 @@ def select_closest_to_mixture(
 
     rec_error = ((gt_mixture - (geni1 + geni2) * 0.5) ** 2).sum([1, 2, 3])
     sel = rec_error.argmin()
+
     return (geni1[sel], geni2[sel]), (gen1_o[sel], gen2_o[sel]), sel
 
 
@@ -183,7 +185,7 @@ class EvaluateSeparationConfig:
     vocab_size: int = MISSING
     batch_size: int = 64
     # TODO: change it back to 64
-    # batch_size: int = 4
+    # batch_size: int = 16
     class_conditioned: bool = False
     num_workers: int = mp.cpu_count() - 1
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -248,6 +250,8 @@ def main(cfg):
 
     print("Start separation")
 
+    psnrs = []
+
     # main separation loop
     for i, batch in enumerate(tqdm.tqdm(test_loader)):
 
@@ -272,15 +276,19 @@ def main(cfg):
 
         gtm = (gt1 + gt2) / 2.0
 
-        # print(f"Refining latents for batch {i}")
-        # gen1, gen2 = refine_latents(
-        #     model,
-        #     gen1lat,
-        #     gen2lat,
-        #     gtm,
-        #     n_iterations=500,
-        #     learning_rate=1e-1,
-        # )
+        psnr = batched_psnr_unconditional(gts=[gt1, gt2], gens=[gen1, gen2])
+        print(
+            f"The psnr before refining for batch {i} is {psnr}")
+
+        print(f"Refining latents for batch {i}")
+        gen1, gen2 = refine_latents(
+            model,
+            gen1lat,
+            gen2lat,
+            gtm,
+            n_iterations=500,
+            learning_rate=1e-1,
+        )
 
         for j in range(len(gen1)):
             img_idx = i * cfg.batch_size + j
@@ -288,6 +296,13 @@ def main(cfg):
             save_image(gen2[j], result_dir / f"sep/{img_idx}-2.png")
             save_image(gt1[j], result_dir / f"ori/{img_idx}-1.png")
             save_image(gt2[j],  result_dir / f"ori/{img_idx}-2.png")
+
+        psnr = batched_psnr_unconditional(gts=[gt1, gt2], gens=[gen1, gen2])
+        print(
+            f"The psnr after refining for batch {i} is {psnr}")
+        psnrs.append(psnr)
+
+    print(f"Final psnr is {np.mean(psnrs)}")
 
 
 if __name__ == '__main__':

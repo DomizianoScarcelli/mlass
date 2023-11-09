@@ -139,9 +139,13 @@ class SparseLikelihood(Likelihood):
     def get_log_likelihood(self, token_idx: int) -> torch.Tensor:
         return slice_along_index(self.sum, token_idx)
 
+    def get_m_marginal_likelihood(self):
+        return torch.log(torch.sparse.sum(
+            self.sum, dim=tuple(i for i in range(self.num_sources))).to_dense() + 1e-12)
+
     def get_marginal_likelihood(self, source_idx: int) -> torch.Tensor:
         sum_dims = tuple(i for i in range(self.num_sources) if i != source_idx)
         dense_marginal = torch.sparse.sum(
             self.sum, dim=sum_dims).to_dense()
 
-        return torch.log(dense_marginal + 1e-25)
+        return torch.log(dense_marginal + 1e-12)

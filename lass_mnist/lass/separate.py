@@ -81,7 +81,7 @@ def select_closest_to_mixture(
     # print(f"Rec error shape is {rec_error.shape}")
     sel = rec_error.argmin()
 
-    # print(f"Selected: {sel}")
+    print(f"Selected: {sel}")
     # print(f"gen1_o.shape: {gen1_o.shape}")
     # print(f"gen2_o.shape: {gen2_o.shape}")
     # print(f"geni1.shape: {geni1.shape}")
@@ -182,8 +182,8 @@ class EvaluateSeparationConfig:
 
     latent_length: int = MISSING
     vocab_size: int = MISSING
-    batch_size: int = 64
-    # batch_size: int = 2
+    # batch_size: int = 64
+    batch_size: int = 16
     class_conditioned: bool = False
     num_workers: int = mp.cpu_count() - 1
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -207,10 +207,6 @@ def main(cfg):
     model = hydra.utils.instantiate(cfg.vqvae).to(cfg.device)
     transformer = hydra.utils.instantiate(cfg.autoregressive).to(cfg.device)
     assert isinstance(transformer, PreTrainedModel)
-
-    print(f"-------------")
-    print(f"Transformer: {transformer}")
-    print(f"-------------")
 
     # create output directory
     result_dir = ROOT_DIR / "separated-images"
@@ -247,7 +243,7 @@ def main(cfg):
     uncond_bos = 0
 
     print("Start separation")
-
+    psnrs = []
     # main separation loop
     for i, batch in enumerate(tqdm.tqdm(test_loader)):
 
@@ -271,6 +267,10 @@ def main(cfg):
             separation_method=hydra.utils.instantiate(cfg.separation_method)
         )
 
+        psnr = batched_psnr_unconditional(gts=[gt1, gt2], gens=[gen1, gen2])
+        print(
+            f"The psnr before refining for batch {i} is {psnr}")
+
         # gtm = (gt1 + gt2) / 2.0
 
         # gen1, gen2 = refine_latents(
@@ -288,6 +288,13 @@ def main(cfg):
             save_image(gen2[j], result_dir / f"sep/{img_idx}-2.png")
             save_image(gt1[j], result_dir / f"ori/{img_idx}-1.png")
             save_image(gt2[j],  result_dir / f"ori/{img_idx}-2.png")
+
+        psnr = batched_psnr_unconditional(gts=[gt1, gt2], gens=[gen1, gen2])
+        print(
+            f"The psnr for batch {i} is {psnr}")
+        psnrs.append(psnr)
+
+    print(f"Final psnr is {np.mean(psnrs)}")
 
 
 if __name__ == '__main__':
