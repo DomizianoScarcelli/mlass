@@ -2,3 +2,4 @@ _target_: diba.diba.fast_sampled_separation
 _partial_: True
 num_samples: 256
 temperature: 1.0
+top_k: 32 #TODO: remove this

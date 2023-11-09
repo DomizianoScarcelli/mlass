@@ -17,7 +17,7 @@ from lass_audio.jukebox.vqvae.vqvae import VQVAE
 from lass_audio.lass.datasets import SeparationDataset
 from lass_audio.lass.datasets import SeparationSubset
 from lass_audio.lass.diba_interfaces import JukeboxPrior, SparseLikelihood
-from diba.diba.factor_graph import FactorGraph
+from diba.diba.factor_graph_v4 import FactorGraph, separate
 from lass_audio.lass.utils import assert_is_audio, decode_latent_codes, get_dataset_subsample, get_raw_to_tokens, setup_priors, setup_vqvae
 from lass_audio.lass.datasets import ChunkedMultipleDataset
 
@@ -89,11 +89,6 @@ class SumProductSeparator(Separator):
             # TODO: this is hard coded, but it corresponds to the max_sample_tokens in the separate, it's also present in the dataset
             # I think it's done in order to have batches of tokens of audio
             time_steps = 1024
-
-            factor_graph = FactorGraph(
-                num_classes=2, mixture=self.mixture_codes)
-
-            raise RuntimeError("Stop here man!")
 
             # STEP 2: For each single time step, compute the prior and the likelihood in order to compute the posterior probability.
             # TODO: generalize for more than 2 sources, now this is just for debug reasons

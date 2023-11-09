@@ -96,15 +96,9 @@ class _SeparationModel(PreTrainedModel):
         x_0 = input_ids.div(num_tokens, rounding_mode="trunc")
         x_1 = input_ids % num_tokens
         past_0, past_1 = (None, None) if past is None else past
-        print(f"Input ids are: {input_ids}, with shape {input_ids.shape}")
-        print(f"x_0 is: {x_0}, with shape {x_0.shape}")
-        print(f"Past 0 is: {past_0}")
-        print(f"x_1 is: {x_1}, with shape {x_1.shape}")
-        print(f"Past 1 is: {past_1}")
 
         # compute log priors
         log_p_0, past_0 = self.prior_0._get_logits(x_0, past_key_value=past_0)
-        print(f"Log p0 shape is: {log_p_0.shape}")
         log_p_1, past_1 = self.prior_1._get_logits(x_1, past_key_value=past_1)
 
         # NOTE: during first token separation batch-size should be 1
@@ -114,6 +108,22 @@ class _SeparationModel(PreTrainedModel):
         # normalize priors and apply temperature
         log_p_0 = normalize_logits(log_p_0, self.temperature)
         log_p_1 = normalize_logits(log_p_1, self.temperature)
+
+        # print("----------------")
+        # print(f"Temperature is {self.temperature}")
+        # print(f"Prior 0 is {self.prior_0}")
+        # print(f"Prior 1 is {self.prior_1}")
+        # print(f"Past 0 is {past_0}")
+        # print(f"Past 1 is {past_1}")
+        # print(f"Logp0 is {log_p_0} with shape {log_p_0.shape}")
+        # print(f"Logp1 is {log_p_1} with shape {log_p_1.shape}")
+        # print(f"X_0 is {x_0} with shape {x_0.shape}")
+        # print(f"X_1 is {x_1} with shape {x_1.shape}")
+        # print(f"Softmaxed logp0 is {torch.softmax(log_p_0, dim=-1)}")
+        # print(f"Softmaxed logp1 is {torch.softmax(log_p_1, dim=-1)}")
+
+        # if x_0.shape[1] != 1:
+        # raise RuntimeError("STop")
 
         # log likelihood in sparse COO format
         # ll_coords shape is torch.Size([2, 553]), while ll_data shape is torch.Size([553])
@@ -310,12 +320,6 @@ def _ancestral_sample(
 
         # x_0 at t=45 is tensor([255, 255, 255, 255, 255, 255, 255, 255, 255, 255]) with shape torch.Size([10])
         # x_1 at t=45 is tensor([653, 653, 653, 653, 653, 653, 653, 653, 653, 653]) with shape torch.Size([10])
-
-        print(
-            f"Log pos sum at t={sample_t} is: {log_post_sum} with shape {log_post_sum.shape}")
-
-        print(f"x_0 at t={sample_t} is {x_0} with shape {x_0.shape}")
-        print(f"x_1 at t={sample_t} is {x_1} with shape {x_1.shape}")
 
     result_0, result_1 = xs_0[:num_current_beams,
                               1:], xs_1[:num_current_beams, 1:]
