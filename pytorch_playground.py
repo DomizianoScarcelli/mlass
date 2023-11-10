@@ -283,5 +283,25 @@ def test_sum_complexity():
     print(f"Sum over 2 dims took {end - start} seconds")
 
 
+def test_sparse_indexing():
+    dummy_tensor = torch.zeros(size=(3, 3, 3, 3))
+    random_indices = torch.tensor([[1, 2, 0, 2],
+                                   [1, 2, 0, 0],
+                                   [1, 2, 1, 1],
+                                   [2, 0, 2, 0],
+                                   [1, 2, 0, 0],
+                                   [2, 0, 2, 0],
+                                   [2, 1, 2, 1],
+                                   [0, 1, 2, 2],
+                                   [2, 1, 2, 0],
+                                   [0, 1, 2, 2]])
+    dummy_tensor[random_indices] = 1
+
+    dummy_tensor = dummy_tensor.to_sparse()
+
+    indexed = dummy_tensor[((1,), (2,))]
+    print(f"Indexed is {indexed}")
+
+
 if __name__ == "__main__":
-    test_sum_complexity()
+    test_sparse_indexing()

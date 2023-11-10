@@ -11,8 +11,11 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision.utils import make_grid
 from tqdm import tqdm
 from .utils import CONFIG_DIR, CONFIG_STORE, ROOT_DIR
+import sparse
 
-NUM_SOURCES = 3
+NUM_SOURCES = 4
+RESUME = True
+RESUME_FROM = 40
 
 
 def roll(x, n):
@@ -31,7 +34,7 @@ def split_images_by_step(images: torch.Tensor, batch_size: int, step: int) -> Li
     return image_batches
 
 
-def train(data_loader, sums, model, args, writer, step):
+def train(data_loader, sums: torch.Tensor, model, args, writer, step):
     for images, _ in tqdm(data_loader, desc="Training sums"):
         images = images.to(args.device)
         sources_images = split_images_by_step(
@@ -46,29 +49,52 @@ def train(data_loader, sums, model, args, writer, step):
             _, z_e_x_mixture, _ = model(images_mixture)
             codes: List[torch.Tensor] = [
                 model.codeBook(z_e_x) for z_e_x in z_e_xs]
-            codes_mixture = model.codeBook(z_e_x_mixture)
+            codes_mixture: torch.Tensor = model.codeBook(z_e_x_mixture)
 
-        codes: torch.Tensor = torch.stack(
-            [code.flatten() for code in codes], dim=0)
+        codes = torch.stack([code.flatten() for code in codes], dim=0)
         codes_mixture = codes_mixture.flatten()
 
         assert len(codes) == NUM_SOURCES
 
-        # NOTE: this is hardcoded because i don't know how to do it dynamically
-        # TODO: in the paper they say they permute the codes in order to have commutativity, but I cannot find this in the code
-        sums[codes[0], codes[1], codes[2], codes_mixture] += 1
-        # sums[codes[0], codes[2], codes[1], codes_mixture] += 1
-        # sums[codes[1], codes[0], codes[2], codes_mixture] += 1
-        # sums[codes[1], codes[2], codes[0], codes_mixture] += 1
-        # sums[codes[2], codes[0], codes[1], codes_mixture] += 1
-        # sums[codes[2], codes[1], codes[0], codes_mixture] += 1
+        codes_indices = torch.stack((*codes, codes_mixture), dim=0)
+
+        ###########################
+        # Update the sparse sum tensor by adding 1 to the indices of the codes
+        ###########################
+
+        # Remove duplicated from codes_indices
+        codes_indices, indices = torch.unique(
+            codes_indices, dim=1, return_inverse=True)
+
+        values = torch.tensor(
+            [1 for _ in range(codes_indices.shape[1])], dtype=torch.long)
+
+        update = torch.sparse_coo_tensor(
+            codes_indices, values, size=sums.shape)
+
+        # coalesced_update = update.coalesce()
+
+        # assert torch.all(coalesced_update.values() == 1)
+
+        sums += update
+
+        # assert torch.any(sums.to_dense() == 1)
 
         step += 1
-    return step
+    return sums, step
 
 
-def evaluate(data_loader, sums, model, args, writer, step):
-    sums_test = sums / (torch.sum(sums) + 1e-16)
+def evaluate(data_loader, sums: torch.Tensor, model, args, writer, step):
+    coalesced_sums = sums.coalesce()
+    value_sums = torch.sum(coalesced_sums.values())
+    normalized_values = coalesced_sums.values() / value_sums
+
+    sums_test = torch.sparse_coo_tensor(
+        indices=coalesced_sums.indices(),
+        values=normalized_values,
+        size=coalesced_sums.shape)
+
+    # sums_test = sums / (torch.sum(sums) + 1e-16)
     batch_size = 16
     with torch.no_grad():
         loss = 0.0
@@ -91,9 +117,28 @@ def evaluate(data_loader, sums, model, args, writer, step):
 
                 codes_mixture = model.codeBook(z_e_x_mixture)
 
-                # NOTE: this is hardcoded because i don't know how to do it dynamically
-                loss += torch.mean(-torch.log(
-                    sums_test[codes[0], codes[1], codes[2], codes_mixture] + 1e-16))
+                codes = torch.stack([code.flatten() for code in codes], dim=0)
+                codes_mixture = codes_mixture.flatten()
+
+                codes_indices = torch.stack((*codes, codes_mixture), dim=0)
+
+                codes_indices = codes_indices.t()
+
+                # TODO: make this more efficient, remove for loop
+                test_sum = []
+                for i in tqdm(range(codes_indices.shape[0]), desc="Computing test sum"):
+                    tuple_index = tuple(codes_indices[i])
+                    indexed = sums_test[tuple_index].item()
+                    test_sum.append(indexed)
+                test_sum = torch.tensor(test_sum)
+
+                # assert torch.allclose(test_sum, sums_test.to_dense()[
+                #                       codes[0], codes[1], codes_mixture].flatten()), f"""
+                # test_sum is {test_sum}
+                # sums_test is {sums_test.to_dense()[codes[0], codes[1], codes_mixture]}
+                # """
+
+                loss += torch.mean(-torch.log(test_sum + 1e-16))
 
         loss /= len(data_loader)
     # Logs
@@ -127,6 +172,7 @@ CONFIG_STORE.store(group="sums_estimation",
 
 @hydra.main(version_base=None, config_path=CONFIG_DIR, config_name="sums_estimation/mnist.yaml")
 def main(cfg):
+    torch.manual_seed(0)
     cfg: SumsEstimationConfig = cfg.sums_estimation
     now = datetime.now()
     current_time = now.strftime("%H:%M:%S")
@@ -172,24 +218,40 @@ def main(cfg):
     for param in model.parameters():
         param.requires_grad = False
 
-    sums = torch.zeros(
-        tuple(cfg.num_codes for _ in range(NUM_SOURCES + 1))).to(cfg.device)
+    if RESUME:
+        sums = torch.load(f"./best_{NUM_SOURCES}_sources.pt")
+        print(
+            f"Loading sums ./best_{NUM_SOURCES}_sources.pt from epoch {RESUME_FROM}")
+    else:
+        sums = torch.sparse_coo_tensor(
+            indices=torch.tensor([[] for _ in range(NUM_SOURCES + 1)],
+                                 dtype=torch.long),
+            values=torch.tensor([], dtype=torch.long),
+            size=(tuple(cfg.num_codes for _ in range(NUM_SOURCES + 1))),
+            device=cfg.device)
 
     assert sums.shape == tuple(cfg.num_codes for _ in range(NUM_SOURCES + 1))
 
     step = 0
     best_loss = -1.0
-    for epoch in tqdm(range(cfg.num_epochs), desc="Training sums epochs"):
-        step = train(train_loader, sums, model, cfg, writer, step)
-        loss = evaluate(test_loader, sums, model, cfg, writer, step)
+    for epoch in tqdm(range(RESUME_FROM if RESUME else 0, cfg.num_epochs), desc="Training sums epochs"):
+        sums, step = train(train_loader, sums, model, cfg, writer, step)
 
-        print("loss = {:f} at epoch {:f}".format(loss, epoch + 1))
-        writer.add_scalar("loss/testing_loss", loss, epoch + 1)
+        if (epoch) % 20 == 0 or epoch == cfg.num_epochs - 1:
+            loss = evaluate(test_loader, sums, model, cfg, writer, step)
 
-        if (epoch == 0) or (loss < best_loss):
-            best_loss = loss
-            model_path = f"./best.pt"
-            torch.save(sums.to_sparse(), model_path)
+            print("loss = {:f} at epoch {:f}".format(loss, epoch + 1))
+            writer.add_scalar("loss/testing_loss", loss, epoch + 1)
+
+            if (epoch == 0) or (loss <= best_loss):
+                best_loss = loss
+                model_path = f"./best_{NUM_SOURCES}_sources.pt"
+                torch.save(sums, model_path)
+
+                torch.save(torch.tensor([]),
+                           f"./last_saved_epoch_is_{epoch}.pt")
+
+                print(f"Saved at epoch {epoch} with loss {loss}")
 
     now = datetime.now()
     current_time = now.strftime("%H:%M:%S")
