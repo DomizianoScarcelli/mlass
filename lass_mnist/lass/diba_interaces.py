@@ -101,17 +101,10 @@ class SparseLikelihood(Likelihood):
         return torch.log(torch.sparse.sum(
             self.sum, dim=tuple(i for i in range(self.num_sources))).to_dense() + 1e-12)
 
-    # TODO: this has to be optimized with belief propagation,
-    # sinnce it takes 0.01 sec for 2 sources, but 3 sec for 3 sources
     def get_marginal_likelihood(self, source_idx: int) -> torch.Tensor:
-        start = time.time()
-
         sum_dims = tuple(i for i in range(self.num_sources) if i != source_idx)
         sparse_marginal = torch.sparse.sum(
             self.sum, dim=sum_dims)
-
-        end = time.time()
-        print(f"Time to compute marginal likelihood: {end-start}")
 
         dense_marginal = sparse_marginal.to_dense()
         return torch.log(dense_marginal + 1e-12)

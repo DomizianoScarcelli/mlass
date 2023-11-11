@@ -11,6 +11,8 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from diba.diba.interfaces import Likelihood, SeparationPrior
 from diba.diba.utils import get_topk, normalize_logits
 
+torch.set_printoptions(precision=2, sci_mode=False)
+
 # from transformers.generation import GreedySearchDecoderOnlyOutput
 
 # def _print_beams(xs_0, xs_1, scores, posterior_data, ll_coords):
@@ -423,9 +425,34 @@ def fast_sampled_separation(
         assert len(log_p_0) == len(log_p_1) == num_samples
         assert log_p_0.shape[-1] == log_p_1.shape[-1] == likelihood.get_tokens_count()
 
+# og prior 0 before normalization is tensor([[    -4.12,    -21.61,    -21.56,  ...,    -21.55,      1.22,                                                                                   | 0/4 [00:00<?, ?it/s]
+#             -21.56],
+#         [    -0.22,    -18.44,    -18.42,  ...,    -18.43,     -2.99,
+#             -18.45],
+#         [     3.10,    -12.84,    -12.84,  ...,    -12.85,      3.20,
+#             -12.85],
+#         ...,
+#         [    -0.53,    -19.97,    -19.99,  ...,    -19.98,      0.23,
+#             -19.99],
+#         [    -0.02,    -21.01,    -20.98,  ...,    -20.97,      1.35,
+#             -20.98],
+#         [    -1.69,    -19.65,    -19.65,  ...,    -19.65,      3.34,
+#             -19.65]])
+# Log prior 0 after normalization is tensor([[-13.92, -31.40, -31.35,  ..., -31.35,  -8.58, -31.36],
+#         [ -8.88, -27.10, -27.09,  ..., -27.09, -11.65, -27.11],
+#         [ -6.12, -22.06, -22.05,  ..., -22.07,  -6.02, -22.07],
+#         ...,
+#         [ -7.33, -26.77, -26.79,  ..., -26.78,  -6.57, -26.79],
+#         [ -9.12, -30.12, -30.08,  ..., -30.07,  -7.75, -30.08],
+#         [ -8.58, -26.54, -26.53,  ..., -26.53,  -3.55, -26.54]])
+        if sample_t == 10:
+            print(f"Log prior 0 before normalization is {log_p_0}")
         # normalize priors and apply temperature
         log_p_0 = normalize_logits(log_p_0, temperature)
         log_p_1 = normalize_logits(log_p_1, temperature)
+        if sample_t == 10:
+            print(f"Log prior 0 after normalization is {log_p_0}")
+            raise Exception("Stop here")
 
         # log likelihood in sparse COO format
         assert isinstance(mixture[sample_t], int)
