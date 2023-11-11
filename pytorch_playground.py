@@ -303,5 +303,16 @@ def test_sparse_indexing():
     print(f"Indexed is {indexed}")
 
 
+def test_concatenation():
+    tens = torch.tensor([])
+    other_tens = torch.tensor(0.0).unsqueeze(0)
+    other_tens_again = torch.tensor(1.0).unsqueeze(0)
+
+    result = torch.cat((tens, other_tens))
+    result = torch.cat((result, other_tens_again))
+
+    print(f"Result of concatenation is {result}")
+
+
 if __name__ == "__main__":
-    test_sparse_indexing()
+    test_concatenation()

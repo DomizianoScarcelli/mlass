@@ -1,21 +1,104 @@
+from __future__ import annotations
+import json
 import multiprocessing as mp
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, List
+from typing import Any, Dict, List, Union
 
 import hydra
+import numpy as np
 import torch
 from omegaconf import MISSING
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.utils import make_grid
 from tqdm import tqdm
 from .utils import CONFIG_DIR, CONFIG_STORE, ROOT_DIR
-import sparse
+import pickle
+import sys
 
-NUM_SOURCES = 4
+NUM_SOURCES = 2
 RESUME = True
-RESUME_FROM = 40
+RESUME_FROM = 46
+
+
+class SparseTensor:
+    def __init__(self,
+                 indices: Union[torch.Tensor, None],
+                 values: Union[torch.Tensor, None],
+                 shape: tuple,
+                 data: Union[Dict[torch.Tensor, torch.Tensor], None] = None,
+                 dtype: torch.dtype = torch.long):
+
+        self.dtype = dtype
+        self.shape = shape
+        if data is not None:
+            if indices is not None or values is not None:
+                raise ValueError(
+                    "Either data or indices and values must be provided.")
+
+            self.data: Dict[torch.Tensor, torch.Tensor] = data
+        else:
+            if indices is None or values is None:
+                raise ValueError(
+                    "Either data or indices and values must be provided.")
+            self.data: Dict[torch.Tensor, torch.Tensor] = {}
+
+            assert indices.dtype == self.dtype and values.dtype == self.dtype
+
+            assert indices.shape[0] == 0 or indices.shape[1] == NUM_SOURCES + 1
+
+            assert indices.shape[0] == values.shape[
+                0], f"The number of indices {indices.shape[0]} must be equal to the number of values {values.shape[0]}"
+
+            for index, value in zip(indices, values):
+                self.data[index] = value
+
+    def index(self, index: torch.Tensor):
+        assert index.dtype == self.dtype
+        assert index.shape == (NUM_SOURCES + 1,)
+        if index in self.data:
+            return self.data[index]
+        return torch.tensor(0, dtype=torch.long)
+
+    def multi_index(self, indices: torch.Tensor):
+        assert indices.dtype == self.dtype
+        assert indices.shape[1] == NUM_SOURCES + 1 and indices.shape[0] > 0
+        return torch.stack([self.data[index] for index in indices])
+
+    def add_value(self, index: torch.Tensor, value: int, reduction: str = "sum") -> None:
+        assert index.dtype == self.dtype
+        assert index.shape == (NUM_SOURCES + 1,)
+        if reduction == "sum":
+            if index in self.data:
+                self.data[index] += value
+            else:
+                self.data[index] = value
+        else:
+            raise NotImplementedError
+
+    def normalize(self, reduction: str = "sum") -> None:
+        value_sum = torch.sum(self.values())
+        if reduction == "sum":
+            for index in self.data:
+                self.data[index] /= value_sum
+        else:
+            raise NotImplementedError
+
+    def save(self, path: str):
+        print(f"Dict size in MB is {sys.getsizeof(self.data)/ (1024 * 1024)}")
+        torch.save(self.data.copy(), path)
+
+    @staticmethod
+    def load(path: str):
+        data = torch.load(path)
+        return SparseTensor(shape=tuple(256 for _ in range(NUM_SOURCES + 1)), data=data, indices=None, values=None)
+
+    def values(self) -> torch.Tensor:
+        return torch.tensor([value for value in self.data.values()])
+
+    def copy(self) -> SparseTensor:
+        return SparseTensor(shape=self.shape, data=self.data.copy(), indices=None, values=None)
 
 
 def roll(x, n):
@@ -34,7 +117,7 @@ def split_images_by_step(images: torch.Tensor, batch_size: int, step: int) -> Li
     return image_batches
 
 
-def train(data_loader, sums: torch.Tensor, model, args, writer, step):
+def train(data_loader, sums: SparseTensor, model, args, writer, step):
     for images, _ in tqdm(data_loader, desc="Training sums"):
         images = images.to(args.device)
         sources_images = split_images_by_step(
@@ -51,12 +134,14 @@ def train(data_loader, sums: torch.Tensor, model, args, writer, step):
                 model.codeBook(z_e_x) for z_e_x in z_e_xs]
             codes_mixture: torch.Tensor = model.codeBook(z_e_x_mixture)
 
-        codes = torch.stack([code.flatten() for code in codes], dim=0)
+        codes = torch.stack([code.flatten()
+                            for code in codes], dim=0)
         codes_mixture = codes_mixture.flatten()
 
         assert len(codes) == NUM_SOURCES
 
-        codes_indices = torch.stack((*codes, codes_mixture), dim=0)
+        codes_indices = torch.stack(
+            (*codes, codes_mixture), dim=0)
 
         ###########################
         # Update the sparse sum tensor by adding 1 to the indices of the codes
@@ -66,17 +151,22 @@ def train(data_loader, sums: torch.Tensor, model, args, writer, step):
         codes_indices, indices = torch.unique(
             codes_indices, dim=1, return_inverse=True)
 
-        values = torch.tensor(
-            [1 for _ in range(codes_indices.shape[1])], dtype=torch.long)
+        codes_indices = codes_indices.t().to(torch.long)
 
-        update = torch.sparse_coo_tensor(
-            codes_indices, values, size=sums.shape)
+        for i in range(codes_indices.shape[0]):
+            sums.add_value(codes_indices[i], 1)
+
+        # values = torch.tensor(
+        #     [1 for _ in range(codes_indices.shape[1])], dtype=torch.long)
+
+        # update = torch.sparse_coo_tensor(
+        #     codes_indices, values, size=sums.shape)
 
         # coalesced_update = update.coalesce()
 
         # assert torch.all(coalesced_update.values() == 1)
 
-        sums += update
+        # sums += update
 
         # assert torch.any(sums.to_dense() == 1)
 
@@ -84,17 +174,10 @@ def train(data_loader, sums: torch.Tensor, model, args, writer, step):
     return sums, step
 
 
-def evaluate(data_loader, sums: torch.Tensor, model, args, writer, step):
-    coalesced_sums = sums.coalesce()
-    value_sums = torch.sum(coalesced_sums.values())
-    normalized_values = coalesced_sums.values() / value_sums
+def evaluate(data_loader, sums: SparseTensor, model, args, writer, step):
+    sums_test = sums.copy()
+    sums_test.normalize()
 
-    sums_test = torch.sparse_coo_tensor(
-        indices=coalesced_sums.indices(),
-        values=normalized_values,
-        size=coalesced_sums.shape)
-
-    # sums_test = sums / (torch.sum(sums) + 1e-16)
     batch_size = 16
     with torch.no_grad():
         loss = 0.0
@@ -122,15 +205,17 @@ def evaluate(data_loader, sums: torch.Tensor, model, args, writer, step):
 
                 codes_indices = torch.stack((*codes, codes_mixture), dim=0)
 
+                # Remove duplicated from codes_indices
+                codes_indices, indices = torch.unique(
+                    codes_indices, dim=1, return_inverse=True)
+
                 codes_indices = codes_indices.t()
 
                 # TODO: make this more efficient, remove for loop
-                test_sum = []
-                for i in tqdm(range(codes_indices.shape[0]), desc="Computing test sum"):
-                    tuple_index = tuple(codes_indices[i])
-                    indexed = sums_test[tuple_index].item()
-                    test_sum.append(indexed)
-                test_sum = torch.tensor(test_sum)
+                test_sum = torch.tensor([])
+                for i in range(codes_indices.shape[0]):
+                    indexed = sums_test.index(codes_indices[i]).unsqueeze(0)
+                    test_sum = torch.cat((test_sum, indexed))
 
                 # assert torch.allclose(test_sum, sums_test.to_dense()[
                 #                       codes[0], codes[1], codes_mixture].flatten()), f"""
@@ -219,16 +304,14 @@ def main(cfg):
         param.requires_grad = False
 
     if RESUME:
-        sums = torch.load(f"./best_{NUM_SOURCES}_sources.pt")
         print(
             f"Loading sums ./best_{NUM_SOURCES}_sources.pt from epoch {RESUME_FROM}")
+        sums = SparseTensor.load(f"./best_{NUM_SOURCES}_sources.pt")
+        print(f"Sums loaded correctly")
     else:
-        sums = torch.sparse_coo_tensor(
-            indices=torch.tensor([[] for _ in range(NUM_SOURCES + 1)],
-                                 dtype=torch.long),
-            values=torch.tensor([], dtype=torch.long),
-            size=(tuple(cfg.num_codes for _ in range(NUM_SOURCES + 1))),
-            device=cfg.device)
+        sums = SparseTensor(indices=torch.tensor([], dtype=torch.long),
+                            values=torch.tensor([], dtype=torch.long),
+                            shape=tuple(cfg.num_codes for _ in range(NUM_SOURCES + 1)))
 
     assert sums.shape == tuple(cfg.num_codes for _ in range(NUM_SOURCES + 1))
 
@@ -237,21 +320,23 @@ def main(cfg):
     for epoch in tqdm(range(RESUME_FROM if RESUME else 0, cfg.num_epochs), desc="Training sums epochs"):
         sums, step = train(train_loader, sums, model, cfg, writer, step)
 
-        if (epoch) % 20 == 0 or epoch == cfg.num_epochs - 1:
-            loss = evaluate(test_loader, sums, model, cfg, writer, step)
+        # if (epoch) % 20 == 0 or epoch == cfg.num_epochs - 1:
+        loss = evaluate(test_loader, sums, model, cfg, writer, step)
 
-            print("loss = {:f} at epoch {:f}".format(loss, epoch + 1))
-            writer.add_scalar("loss/testing_loss", loss, epoch + 1)
+        print("loss = {:f} at epoch {:f}".format(loss, epoch + 1))
+        writer.add_scalar("loss/testing_loss", loss, epoch + 1)
 
-            if (epoch == 0) or (loss <= best_loss):
-                best_loss = loss
-                model_path = f"./best_{NUM_SOURCES}_sources.pt"
-                torch.save(sums, model_path)
+        if (epoch == 0) or (loss <= best_loss):
+            best_loss = loss
+            model_path = f"./best_{NUM_SOURCES}_sources.pt"
+            sums.save(model_path)
 
-                torch.save(torch.tensor([]),
-                           f"./last_saved_epoch_is_{epoch}.pt")
+            torch.save(torch.tensor([]),
+                       f"./last_saved_epoch_is_{epoch}.pt")
 
-                print(f"Saved at epoch {epoch} with loss {loss}")
+            print(f"Saved at epoch {epoch} with loss {loss}")
+        model_path = f"./sums_{NUM_SOURCES}_sources.pt"
+        sums.save(model_path)
 
     now = datetime.now()
     current_time = now.strftime("%H:%M:%S")

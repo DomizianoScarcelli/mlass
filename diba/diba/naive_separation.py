@@ -5,7 +5,7 @@ from tqdm import tqdm
 from diba.diba.utils import normalize_logits
 from torchvision.utils import save_image
 
-from lass_mnist.lass.diba_interaces import SparseLikelihood, UnconditionedTransformerPrior
+from lass_mnist.lass.diba_interaces import DenseMarginalLikelihood, UnconditionedTransformerPrior
 from transformers import GPT2LMHeadModel, GPT2Config
 
 import logging
@@ -30,11 +30,10 @@ def _check_if_nan_or_inf(tensor: torch.Tensor) -> bool:
 def sample(mixture_t: int,
            priors: List[UnconditionedTransformerPrior],
            sources: int, past_z: torch.Tensor,
-           partial_likelihoods: List[torch.Tensor],
-           m_marginal: torch.Tensor):
+           likelihood: torch.Tensor):
     samples_t = []
     for i in range(sources):
-        partial_likelihood = partial_likelihoods[i]
+        partial_likelihood = likelihood[i]
 
         log_likelihood = partial_likelihood[:, mixture_t].view(-1)
 
@@ -71,12 +70,14 @@ def sample(mixture_t: int,
         K = 32
         top_k_posterior, top_k_indices = torch.topk(log_posterior, k=K, dim=-1)
 
+        softmaxed_top_k_posterior = torch.softmax(top_k_posterior, dim=-1)
+
         sample = []
         for i in range(log_posterior.shape[0]):
             sample.append(torch.tensor(
                 np.random.choice(
-                    top_k_indices[i].numpy(),
-                    p=torch.softmax(top_k_posterior[i], dim=0).numpy())))  # TODO: I cannot insert logits here, but I don't know if softmax is correct
+                    top_k_indices[i].detach().numpy(),
+                    p=softmaxed_top_k_posterior[i].detach().numpy())))
 
         sample = torch.stack(sample, dim=0)
 
@@ -90,29 +91,23 @@ def sample(mixture_t: int,
 
 
 def separate(mixture: torch.Tensor,
-             likelihood: SparseLikelihood,
+             likelihood: torch.Tensor,
              transformer: GPT2LMHeadModel,
              sources: int):
     past = torch.zeros((sources, 256, 1))
     mixture_length = len(mixture)
     all_samples = past.detach().clone()
-    partial_likelihoods = []
     priors = []
-    for i in range(sources):
-        partial_likelihood = likelihood.get_marginal_likelihood(
-            source_idx=i)
-        partial_likelihoods.append(partial_likelihood)
+    for _ in range(sources):
         priors.append(UnconditionedTransformerPrior(
             transformer=transformer, sos=0))
 
-    m_marginal = likelihood.get_m_marginal_likelihood()
-    for t in range(mixture_length):
+    for t in tqdm(range(mixture_length), desc="Separating mixture"):
         samples = sample(mixture_t=mixture[t],
                          priors=priors,
                          sources=sources,
                          past_z=past,
-                         partial_likelihoods=partial_likelihoods,
-                         m_marginal=m_marginal)
+                         likelihood=likelihood)
         all_samples = torch.cat((all_samples, samples), dim=2)
 
         log.debug(f"New all samples shape is {all_samples.shape}")
@@ -138,7 +133,7 @@ if __name__ == "__main__":
                             254, 26, 9, 168, 135, 210, 29, 26, 88, 222, 75, 210, 56, 56, 88, 4, 34, 80, 8, 56, 137, 75, 7, 41, 8, 56])
     # MIXTURE_LENGTH = 49
 
-    SUMS_CHECKPOINT_PATH = "lass_mnist/checkpoints/sum/3_sources_sums_epoch_430.pt"
+    SUMS_CHECKPOINT_PATH = "lass_mnist/checkpoints/sum/best_3_sources.pt"
 
     log.debug(f"Loading sparse sums")
     with open(SUMS_CHECKPOINT_PATH, 'rb') as f:
@@ -164,20 +159,13 @@ if __name__ == "__main__":
 
     transformer.eval()
 
-    likelihood = SparseLikelihood(sums=sums)
-
-    # all_samples = separate(mixture=mixture, likelihood=likelihood,
-    #                        transformer=transformer, sources=3)
-
-    # sliced_likelihood = likelihood.get_log_likelihood(mixture[0])
+    likelihood = DenseMarginalLikelihood(sums=sums)
 
     result_dir = ROOT_DIR / "multi-separated-images"
 
     z1, z2, z3 = separate(mixture=mixture, likelihood=likelihood,
                           transformer=transformer, sources=3)
 
-    # save_image(z1, result_dir / f"sep/{0}-1.png")
-    # save_image(z2, result_dir / f"sep/{1}-2.png")
-    # save_image(z2, result_dir / f"sep/{2}-2.png")
-
-    # log.debug(f"All samples are {all_samples} with shape {all_samples.shape}")
+    print(f"z1 is {z1}")
+    print(f"z2 is {z2}")
+    print(f"z3 is {z3}")

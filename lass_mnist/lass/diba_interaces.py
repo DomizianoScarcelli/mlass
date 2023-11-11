@@ -115,3 +115,15 @@ class SparseLikelihood(Likelihood):
 
         dense_marginal = sparse_marginal.to_dense()
         return torch.log(dense_marginal + 1e-12)
+
+
+class DenseMarginalLikelihood():
+    def __init__(self, sums: torch.Tensor):
+        # normalize the sums over the conditionals in order to get the likelihood function at each z_m
+        n_sources = sums.shape[0]
+        print(f"Computing marginal probability")
+        for i in range(n_sources):
+            p_zi = torch.sum(sums[i], dim=0)
+            sums[i] /= (p_zi + 1e-12)
+        print(f"Marginal probability correctly computed")
+        self.sums = torch.log(sums + 1e-12)

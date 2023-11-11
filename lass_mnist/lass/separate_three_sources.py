@@ -22,7 +22,7 @@ from diba.diba.naive_separation import separate
 
 from ..modules import VectorQuantizedVAE
 from .utils import refine_latents, CONFIG_DIR, ROOT_DIR, CONFIG_STORE, refine_latents_three
-from .diba_interaces import SparseLikelihood, UnconditionedTransformerPrior, DenseLikelihood
+from .diba_interaces import DenseMarginalLikelihood, UnconditionedTransformerPrior, DenseLikelihood
 import multiprocessing as mp
 from typing import Sequence
 from numpy.random import default_rng
@@ -145,8 +145,6 @@ def generate_samples(
     codes_mixture = codes_mixture.view(
         batch_size, latent_length ** 2).tolist()  # (B, H**2)
 
-    likelihood = SparseLikelihood(sums=sums)
-
     gen1ims, gen2ims, gen3ims = [], [], []
     gen1lats, gen2lats, gen3lats = [], [], []
 
@@ -154,7 +152,7 @@ def generate_samples(
         mixture = torch.tensor(codes_mixture[bi])
 
         z0, z1, z2 = separate(
-            mixture=mixture, likelihood=likelihood, transformer=transformer, sources=3)
+            mixture=mixture, likelihood=sums, transformer=transformer, sources=3)
 
         (x0, x1, x2), (x0lat, x1lat, x2lat), _ = select_closest_to_mixture(
             vqvae=model,
@@ -270,9 +268,11 @@ def main(cfg):
     with open(cfg.checkpoints.autoregressive, 'rb') as f:
         transformer.load_state_dict(torch.load(f, map_location=cfg.device))
 
-    SUMS_CHECKPOINT_PATH = "lass_mnist/checkpoints/sum/3_sources_sums_epoch_430.pt"
+    SUMS_CHECKPOINT_PATH = "lass_mnist/checkpoints/sum/best_3_sources.pt"
     with open(SUMS_CHECKPOINT_PATH, 'rb') as f:
         sums = torch.load(f, map_location=cfg.device)
+
+    likelihood = DenseMarginalLikelihood(sums=sums)
 
     # set models to eval
     model.eval()
@@ -302,7 +302,7 @@ def main(cfg):
         (gen1, gen2, gen3), (gen1lat, gen2lat, gen3lat) = generate_samples(
             model=model,
             transformer=transformer,
-            sums=sums,
+            sums=likelihood.sums[:3],
             gts=[gt1, gt2, gt3],
             bos=[labels1, labels2, labels3],
             latent_length=cfg.latent_length,

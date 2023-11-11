@@ -22,7 +22,7 @@ from diba.diba.naive_separation import separate
 
 from ..modules import VectorQuantizedVAE
 from .utils import refine_latents, CONFIG_DIR, ROOT_DIR, CONFIG_STORE
-from .diba_interaces import SparseLikelihood, UnconditionedTransformerPrior, DenseLikelihood
+from .diba_interaces import DenseMarginalLikelihood, SparseLikelihood, UnconditionedTransformerPrior, DenseLikelihood
 import multiprocessing as mp
 from typing import Sequence
 from numpy.random import default_rng
@@ -118,9 +118,6 @@ def generate_samples(
     p0 = UnconditionedTransformerPrior(transformer=transformer, sos=label0)
     p1 = UnconditionedTransformerPrior(transformer=transformer, sos=label1)
 
-    # likelihood = DenseLikelihood(sums=sums)
-    likelihood = SparseLikelihood(sums=sums.to_sparse())
-
     gen1ims, gen2ims = [], []
     gen1lats, gen2lats = [], []
 
@@ -128,7 +125,7 @@ def generate_samples(
         mixture = torch.tensor(codes_mixture[bi])
 
         z0, z1 = separate(
-            mixture=mixture, likelihood=likelihood, transformer=transformer, sources=2)
+            mixture=mixture, likelihood=sums, transformer=transformer, sources=2)
 
         (x0, x1), (x0lat, x1lat), _ = select_closest_to_mixture(
             vqvae=model,
@@ -183,7 +180,7 @@ class EvaluateSeparationConfig:
 
     latent_length: int = MISSING
     vocab_size: int = MISSING
-    batch_size: int = 64
+    batch_size: int = 4
     # TODO: change it back to 64
     # batch_size: int = 16
     class_conditioned: bool = False
@@ -225,7 +222,7 @@ def main(cfg):
 
     # Define the data loaders
     test_loader = torch.utils.data.DataLoader(
-        PairsDataset(test_set, seed=100),
+        PairsDataset(test_set, seed=200),
         num_workers=cfg.num_workers,
         batch_size=cfg.batch_size,
         shuffle=False,
@@ -239,9 +236,11 @@ def main(cfg):
     with open(cfg.checkpoints.autoregressive, 'rb') as f:
         transformer.load_state_dict(torch.load(f, map_location=cfg.device))
 
-    with open(cfg.checkpoints.sums, 'rb') as f:
+    SUMS_CHECKPOINT_PATH = "lass_mnist/checkpoints/sum/best_3_sources.pt"
+    with open(SUMS_CHECKPOINT_PATH, 'rb') as f:
         sums = torch.load(f, map_location=cfg.device)
 
+    likelihood = DenseMarginalLikelihood(sums=sums)
     # set models to eval
     model.eval()
     transformer.eval()
@@ -268,7 +267,7 @@ def main(cfg):
         (gen1, gen2), (gen1lat, gen2lat) = generate_samples(
             model=model,
             transformer=transformer,
-            sums=sums,
+            sums=likelihood.sums[:2],
             gts=[gt1, gt2],
             bos=[labels1, labels2],
             latent_length=cfg.latent_length,
@@ -280,15 +279,15 @@ def main(cfg):
         print(
             f"The psnr before refining for batch {i} is {psnr}")
 
-        print(f"Refining latents for batch {i}")
-        gen1, gen2 = refine_latents(
-            model,
-            gen1lat,
-            gen2lat,
-            gtm,
-            n_iterations=500,
-            learning_rate=1e-1,
-        )
+        # print(f"Refining latents for batch {i}")
+        # gen1, gen2 = refine_latents(
+        #     model,
+        #     gen1lat,
+        #     gen2lat,
+        #     gtm,
+        #     n_iterations=500,
+        #     learning_rate=1e-1,
+        # )
 
         for j in range(len(gen1)):
             img_idx = i * cfg.batch_size + j
