@@ -3,7 +3,6 @@ import numpy as np
 import torch
 from tqdm import tqdm
 from diba.diba.utils import normalize_logits
-from torchvision.utils import save_image
 
 from lass_mnist.lass.diba_interaces import DenseMarginalLikelihood, UnconditionedTransformerPrior
 from transformers import GPT2LMHeadModel, GPT2Config
@@ -125,47 +124,47 @@ def separate(mixture: torch.Tensor,
         f"Separation for {sources} sources is not implemented")
 
 
-if __name__ == "__main__":
-    #############
-    # Main code #
-    #############
-    mixture = torch.tensor([210, 135, 8, 202, 135, 8, 56, 39, 63, 168, 149, 119, 70, 56, 137, 149, 93, 217, 217, 217, 8, 210, 66,
-                            254, 26, 9, 168, 135, 210, 29, 26, 88, 222, 75, 210, 56, 56, 88, 4, 34, 80, 8, 56, 137, 75, 7, 41, 8, 56])
-    # MIXTURE_LENGTH = 49
+# if __name__ == "__main__":
+#     #############
+#     # Main code #
+#     #############
+#     mixture = torch.tensor([210, 135, 8, 202, 135, 8, 56, 39, 63, 168, 149, 119, 70, 56, 137, 149, 93, 217, 217, 217, 8, 210, 66,
+#                             254, 26, 9, 168, 135, 210, 29, 26, 88, 222, 75, 210, 56, 56, 88, 4, 34, 80, 8, 56, 137, 75, 7, 41, 8, 56])
+#     # MIXTURE_LENGTH = 49
 
-    SUMS_CHECKPOINT_PATH = "lass_mnist/checkpoints/sum/best_3_sources.pt"
+#     SUMS_CHECKPOINT_PATH = "lass_mnist/checkpoints/sum/best_3_sources.pt"
 
-    log.debug(f"Loading sparse sums")
-    with open(SUMS_CHECKPOINT_PATH, 'rb') as f:
-        sums = torch.load(f, map_location=torch.device('cpu'))
+#     log.debug(f"Loading sparse sums")
+#     with open(SUMS_CHECKPOINT_PATH, 'rb') as f:
+#         sums = torch.load(f, map_location=torch.device('cpu'))
 
-    transformer_config = GPT2Config(
-        vocab_size=256,
-        n_positions=len(mixture),
-        n_embd=128,
-        n_layer=3,
-        n_head=2,
-        use_cache=False,
-        bos_token_id=0,
-        eos_token_id=511,)
+#     transformer_config = GPT2Config(
+#         vocab_size=256,
+#         n_positions=len(mixture),
+#         n_embd=128,
+#         n_layer=3,
+#         n_head=2,
+#         use_cache=False,
+#         bos_token_id=0,
+#         eos_token_id=511,)
 
-    transformer = GPT2LMHeadModel(
-        config=transformer_config)
+#     transformer = GPT2LMHeadModel(
+#         config=transformer_config)
 
-    AUTOREGRESSIVE_CHECKPOINT_PATH = "lass_mnist/checkpoints/unconditioned/256-sigmoid-big.pt"
-    with open(AUTOREGRESSIVE_CHECKPOINT_PATH, 'rb') as f:
-        transformer.load_state_dict(
-            torch.load(f, map_location=torch.device('cpu')))
+#     AUTOREGRESSIVE_CHECKPOINT_PATH = "lass_mnist/checkpoints/unconditioned/256-sigmoid-big.pt"
+#     with open(AUTOREGRESSIVE_CHECKPOINT_PATH, 'rb') as f:
+#         transformer.load_state_dict(
+#             torch.load(f, map_location=torch.device('cpu')))
 
-    transformer.eval()
+#     transformer.eval()
 
-    likelihood = DenseMarginalLikelihood(sums=sums)
+#     likelihood = DenseMarginalLikelihood(sums=sums)
 
-    result_dir = ROOT_DIR / "multi-separated-images"
+#     result_dir = ROOT_DIR / "multi-separated-images"
 
-    z1, z2, z3 = separate(mixture=mixture, likelihood=likelihood,
-                          transformer=transformer, sources=3)
+#     z1, z2, z3 = separate(mixture=mixture, likelihood=likelihood,
+#                           transformer=transformer, sources=3)
 
-    print(f"z1 is {z1}")
-    print(f"z2 is {z2}")
-    print(f"z3 is {z3}")
+#     print(f"z1 is {z1}")
+#     print(f"z2 is {z2}")
+#     print(f"z3 is {z3}")

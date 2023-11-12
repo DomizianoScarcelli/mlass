@@ -149,7 +149,7 @@ def generate_samples(
     gen1lats, gen2lats, gen3lats = [], [], []
 
     for bi in tqdm.tqdm(range(batch_size), desc="separating"):
-        mixture = torch.tensor(codes_mixture[bi])
+        mixture = codes_mixture[bi]
 
         z0, z1, z2 = separate(
             mixture=mixture, likelihood=sums, transformer=transformer, sources=3)
@@ -212,7 +212,7 @@ class EvaluateSeparationConfig:
 
     latent_length: int = MISSING
     vocab_size: int = MISSING
-    batch_size: int = 4
+    batch_size: int = 32
     # TODO: change it back to 64
     # batch_size: int = 4
     class_conditioned: bool = False
@@ -314,16 +314,16 @@ def main(cfg):
         print(
             f"The psnr before refining for batch {i} is {psnr}")
 
-        # print(f"Refining latents for batch {i}")
-        # gen1, gen2, gen3 = refine_latents_three(
-        #     model,
-        #     gen1lat,
-        #     gen2lat,
-        #     gen3lat,
-        #     gtm,
-        #     n_iterations=500,
-        #     learning_rate=1e-1,
-        # )
+        print(f"Refining latents for batch {i}")
+        gen1, gen2, gen3 = refine_latents_three(
+            model,
+            gen1lat,
+            gen2lat,
+            gen3lat,
+            gtm,
+            n_iterations=500,
+            learning_rate=1e-1,
+        )
 
         for j in range(len(gen1)):
             img_idx = i * cfg.batch_size + j
@@ -337,7 +337,7 @@ def main(cfg):
         psnr = batched_psnr_unconditional(
             gts=[gt1, gt2, gt3], gens=[gen1, gen2, gen3])
         print(
-            f"The psnr for batch {i} is {psnr}")
+            f"\nThe psnr for batch {i} is {psnr}")
         psnrs.append(psnr)
 
     print(f"Final psnr is {np.mean(psnrs)}")

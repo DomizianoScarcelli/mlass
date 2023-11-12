@@ -12,9 +12,9 @@ from torchvision.utils import make_grid
 from tqdm import tqdm
 from .utils import CONFIG_DIR, CONFIG_STORE, ROOT_DIR
 
-NUM_SOURCES = 3
-RESUME = True
-RESUME_FROM = 48
+NUM_SOURCES = 4
+RESUME = False
+RESUME_FROM = 0
 
 
 def roll(x, n):

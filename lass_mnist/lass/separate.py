@@ -267,16 +267,16 @@ def main(cfg):
         print(
             f"The psnr before refining for batch {i} is {psnr}")
 
-        # gtm = (gt1 + gt2) / 2.0
+        gtm = (gt1 + gt2) / 2.0
 
-        # gen1, gen2 = refine_latents(
-        #     model,
-        #     gen1lat,
-        #     gen2lat,
-        #     gtm,
-        #     n_iterations=500,
-        #     learning_rate=1e-1,
-        # )
+        gen1, gen2 = refine_latents(
+            model,
+            gen1lat,
+            gen2lat,
+            gtm,
+            n_iterations=500,
+            learning_rate=1e-1,
+        )
 
         for j in range(len(gen1)):
             img_idx = i * cfg.batch_size + j
@@ -287,7 +287,7 @@ def main(cfg):
 
         psnr = batched_psnr_unconditional(gts=[gt1, gt2], gens=[gen1, gen2])
         print(
-            f"The psnr for batch {i} is {psnr}")
+            f"\nThe psnr for batch {i} is {psnr}")
         psnrs.append(psnr)
 
     print(f"Final psnr is {np.mean(psnrs)}")
