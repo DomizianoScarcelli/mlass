@@ -55,7 +55,8 @@ def refine_latents(
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 100, 0.5)
 
     # optimize
-    for s in tqdm(range(n_iterations), desc="Refining latents"):
+    pbar = tqdm(range(n_iterations), desc="Refining latents")
+    for s in range(n_iterations):
         geni1 = model.decode_latents(gen1)
         geni2 = model.decode_latents(gen2)
         geni_mixtures = (geni1 + geni2) / 2.0
@@ -63,6 +64,8 @@ def refine_latents(
         reg = regularizer_coeff * \
             torch.mean((gen1 - latents_1) ** 2 + (gen2 - latents_2) ** 2)
         loss = torch.mean((geni_mixtures - mixtures).pow(2)) + reg
+        pbar.set_description(f"Refining latents, Loss: {loss}")
+        pbar.update(1)
         loss.backward()
 
         optimizer.step()
@@ -113,11 +116,12 @@ def refine_latents_three(
     latents_3 = latents_3.clone().detach()
     mixtures = mixtures.clone().detach()
 
-    optimizer = torch.optim.Adam([gen1, gen2], lr=learning_rate)
+    optimizer = torch.optim.Adam([gen1, gen2, gen3], lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 100, 0.5)
 
     # optimize
-    for s in tqdm(range(n_iterations), desc="Refining latents"):
+    pbar = tqdm(range(n_iterations), desc="Refining latents")
+    for s in range(n_iterations):
         geni1 = model.decode_latents(gen1)
         geni2 = model.decode_latents(gen2)
         geni3 = model.decode_latents(gen3)
@@ -127,6 +131,8 @@ def refine_latents_three(
             torch.mean((gen1 - latents_1) ** 2 + (gen2 - latents_2)
                        ** 2 + (gen3 - latents_3) ** 2)
         loss = torch.mean((geni_mixtures - mixtures).pow(2)) + reg
+        pbar.set_description(f"Refining latents, Loss: {loss}")
+        pbar.update(1)
         loss.backward()
 
         optimizer.step()

@@ -11,6 +11,8 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from diba.diba.interfaces import Likelihood, SeparationPrior
 from diba.diba.utils import get_topk, normalize_logits
 
+torch.set_printoptions(precision=2, sci_mode=False)
+
 # from transformers.generation import GreedySearchDecoderOnlyOutput
 
 # def _print_beams(xs_0, xs_1, scores, posterior_data, ll_coords):

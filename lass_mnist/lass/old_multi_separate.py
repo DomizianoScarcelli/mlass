@@ -1,7 +1,13 @@
+"""
+This will contain the code in order to perform the separation with more than 2 sources.
+
+NOTE: for now, since I don't want to modify the dataset loader to have multiple sources, I will use only 2 sources, but use the graphical model
+to separate.
+"""
 from dataclasses import dataclass, field
-import shutil
 from typing import Tuple, List, Any, Optional, Mapping, Callable
 
+import shutil
 import hydra
 import torch
 import torchmetrics
@@ -11,9 +17,12 @@ from transformers import GPT2LMHeadModel, PreTrainedModel
 from torchvision.utils import save_image
 import numpy as np
 import random
+
+from diba.diba.old_naive_separation import separate
+
 from ..modules import VectorQuantizedVAE
 from .utils import refine_latents, CONFIG_DIR, ROOT_DIR, CONFIG_STORE
-from .diba_interaces import UnconditionedTransformerPrior, DenseLikelihood
+from .diba_interaces import SparseLikelihood, UnconditionedTransformerPrior, DenseLikelihood
 import multiprocessing as mp
 from typing import Sequence
 from numpy.random import default_rng
@@ -43,7 +52,8 @@ def seed_worker(worker_id):
 
 
 def psnr_grayscale(target, preds, reduction="elementwise_mean", dim=None):
-    return torchmetrics.functional.peak_signal_noise_ratio(preds, target, data_range=1.0, reduction=reduction, dim=dim)
+    return torchmetrics.functional.peak_signal_noise_ratio(
+        preds, target, data_range=1.0, reduction=reduction, dim=dim)
 
 
 def batched_psnr_unconditional(gts: List[torch.Tensor], gens: List[torch.Tensor]) -> float:
@@ -77,7 +87,6 @@ def select_closest_to_mixture(
     geni1 = vqvae.decode_latents(gen1_o).detach().clone()
     geni2 = vqvae.decode_latents(gen2_o).detach().clone()
 
-    # Rec error shape is torch.Size([1])
     rec_error = ((gt_mixture - (geni1 + geni2) * 0.5) ** 2).sum([1, 2, 3])
     sel = rec_error.argmin()
 
@@ -92,7 +101,6 @@ def generate_samples(
     gts: Tuple[torch.Tensor, torch.Tensor],
     bos: Tuple[int, int],
     latent_length: int,
-    separation_method: Callable = None,
 ):
     gt1, gt2 = gts
     gtm = 0.5 * gt1 + 0.5 * gt2
@@ -106,41 +114,40 @@ def generate_samples(
     codes_mixture = codes_mixture.view(
         batch_size, latent_length ** 2).tolist()  # (B, H**2)
 
-    # instantiate diba interface
     label0, label1 = bos
-    p0 = UnconditionedTransformerPrior(transformer=transformer, sos=0)
-    p1 = UnconditionedTransformerPrior(transformer=transformer, sos=0)
+    p0 = UnconditionedTransformerPrior(transformer=transformer, sos=label0)
+    p1 = UnconditionedTransformerPrior(transformer=transformer, sos=label1)
 
-    likelihood = DenseLikelihood(sums=sums)
+    # likelihood = DenseLikelihood(sums=sums)
+    likelihood = SparseLikelihood(sums=sums.to_sparse())
 
     gen1ims, gen2ims = [], []
     gen1lats, gen2lats = [], []
-    for bi in tqdm.tqdm(range(batch_size), desc="separating"):
-        # print(f"I'm using the separation method: {separation_method}")
-        r0, r1 = separation_method(
-            priors=[p0, p1],
-            likelihood=likelihood,
-            mixture=codes_mixture[bi],
-        )
 
-        # get separation closer to mixture
-        (gen1im, gen2im), (gen1lat, gen2lat), _ = select_closest_to_mixture(
+    for bi in tqdm.tqdm(range(batch_size), desc="separating"):
+        mixture = torch.tensor(codes_mixture[bi])
+
+        z0, z1 = separate(
+            mixture=mixture, likelihood=likelihood, transformer=transformer, sources=2)
+
+        (x0, x1), (x0lat, x1lat), _ = select_closest_to_mixture(
             vqvae=model,
-            gen1=r0.reshape(-1, latent_length, latent_length),
-            gen2=r1.reshape(-1, latent_length, latent_length),
+            gen1=z0.reshape(-1, latent_length, latent_length),
+            gen2=z1.reshape(-1, latent_length, latent_length),
             gt_mixture=gtm[bi:bi+1],
         )
 
-        gen1ims.append(gen1im)
-        gen2ims.append(gen2im)
-        gen1lats.append(gen1lat)
-        gen2lats.append(gen2lat)
+        gen1ims.append(x0)
+        gen2ims.append(x1)
+        gen1lats.append(x0lat)
+        gen2lats.append(x1lat)
 
-    # Shapes are: torch.Size([2, 1, 28, 28]), torch.Size([2, 1, 28, 28]), torch.Size([2, 128, 7, 7]), torch.Size([2, 128, 7, 7])
-    gen1im = torch.stack(gen1ims, dim=0)
-    gen2im = torch.stack(gen2ims, dim=0)
-    gen1lat = torch.stack(gen1lats, dim=0)
-    gen2lat = torch.stack(gen2lats, dim=0)
+    # Shapes are: torch.Size([2, (1), 1, 28, 28]), torch.Size([2, (1), 1, 28, 28]), torch.Size([2, (1), 128, 7, 7]), torch.Size([2, (1), 128, 7, 7])
+    # the (1) means that the size has been squeezed
+    gen1im = torch.stack(gen1ims, dim=0).squeeze(1)
+    gen2im = torch.stack(gen2ims, dim=0).squeeze(1)
+    gen1lat = torch.stack(gen1lats, dim=0).squeeze(1)
+    gen2lat = torch.stack(gen2lats, dim=0).squeeze(1)
 
     return (gen1im, gen2im), (gen1lat, gen2lat)
 
@@ -176,8 +183,9 @@ class EvaluateSeparationConfig:
 
     latent_length: int = MISSING
     vocab_size: int = MISSING
-    # batch_size: int = 64
     batch_size: int = 4
+    # TODO: change it back to 64
+    # batch_size: int = 16
     class_conditioned: bool = False
     num_workers: int = mp.cpu_count() - 1
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -200,12 +208,14 @@ def main(cfg):
     # instantiate models
     model = hydra.utils.instantiate(cfg.vqvae).to(cfg.device)
     transformer = hydra.utils.instantiate(cfg.autoregressive).to(cfg.device)
+
     assert isinstance(transformer, PreTrainedModel)
 
     # create output directory
-    result_dir = ROOT_DIR / "separated-images"
+    result_dir = ROOT_DIR / "multi-separated-images"
     if result_dir.exists():
         shutil.rmtree(result_dir)
+
     result_dir.mkdir(parents=True)
     (result_dir / "sep").mkdir()
     (result_dir / "ori").mkdir()
@@ -239,7 +249,9 @@ def main(cfg):
     uncond_bos = 0
 
     print("Start separation")
+
     psnrs = []
+
     # main separation loop
     for i, batch in enumerate(tqdm.tqdm(test_loader)):
 
@@ -260,23 +272,23 @@ def main(cfg):
             gts=[gt1, gt2],
             bos=[labels1, labels2],
             latent_length=cfg.latent_length,
-            separation_method=hydra.utils.instantiate(cfg.separation_method)
         )
+
+        gtm = (gt1 + gt2) / 2.0
 
         psnr = batched_psnr_unconditional(gts=[gt1, gt2], gens=[gen1, gen2])
         print(
             f"The psnr before refining for batch {i} is {psnr}")
 
-        gtm = (gt1 + gt2) / 2.0
-
-        gen1, gen2 = refine_latents(
-            model,
-            gen1lat,
-            gen2lat,
-            gtm,
-            n_iterations=500,
-            learning_rate=1e-1,
-        )
+        # print(f"Refining latents for batch {i}")
+        # gen1, gen2 = refine_latents(
+        #     model,
+        #     gen1lat,
+        #     gen2lat,
+        #     gtm,
+        #     n_iterations=500,
+        #     learning_rate=1e-1,
+        # )
 
         for j in range(len(gen1)):
             img_idx = i * cfg.batch_size + j
@@ -287,7 +299,7 @@ def main(cfg):
 
         psnr = batched_psnr_unconditional(gts=[gt1, gt2], gens=[gen1, gen2])
         print(
-            f"\nThe psnr for batch {i} is {psnr}")
+            f"The psnr after refining for batch {i} is {psnr}")
         psnrs.append(psnr)
 
     print(f"Final psnr is {np.mean(psnrs)}")

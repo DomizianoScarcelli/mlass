@@ -283,5 +283,36 @@ def test_sum_complexity():
     print(f"Sum over 2 dims took {end - start} seconds")
 
 
+def test_sparse_indexing():
+    dummy_tensor = torch.zeros(size=(3, 3, 3, 3))
+    random_indices = torch.tensor([[1, 2, 0, 2],
+                                   [1, 2, 0, 0],
+                                   [1, 2, 1, 1],
+                                   [2, 0, 2, 0],
+                                   [1, 2, 0, 0],
+                                   [2, 0, 2, 0],
+                                   [2, 1, 2, 1],
+                                   [0, 1, 2, 2],
+                                   [2, 1, 2, 0],
+                                   [0, 1, 2, 2]])
+    dummy_tensor[random_indices] = 1
+
+    dummy_tensor = dummy_tensor.to_sparse()
+
+    indexed = dummy_tensor[((1,), (2,))]
+    print(f"Indexed is {indexed}")
+
+
+def test_concatenation():
+    tens = torch.tensor([])
+    other_tens = torch.tensor(0.0).unsqueeze(0)
+    other_tens_again = torch.tensor(1.0).unsqueeze(0)
+
+    result = torch.cat((tens, other_tens))
+    result = torch.cat((result, other_tens_again))
+
+    print(f"Result of concatenation is {result}")
+
+
 if __name__ == "__main__":
-    test_sum_complexity()
+    test_concatenation()
