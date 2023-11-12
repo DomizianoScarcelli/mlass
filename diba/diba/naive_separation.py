@@ -67,7 +67,7 @@ def sample(mixture_t: int,
 
         log_posterior = LAMBDA * log_likelihood + log_prior
 
-        K = 64
+        K = 32
         top_k_posterior, top_k_indices = torch.topk(log_posterior, k=K, dim=-1)
 
         softmaxed_top_k_posterior = torch.softmax(top_k_posterior, dim=-1)

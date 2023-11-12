@@ -122,7 +122,7 @@ def generate_samples(
     gen1lats, gen2lats = [], []
 
     for bi in tqdm.tqdm(range(batch_size), desc="separating"):
-        mixture = torch.tensor(codes_mixture[bi])
+        mixture = codes_mixture[bi]
 
         z0, z1 = separate(
             mixture=mixture, likelihood=sums, transformer=transformer, sources=2)
@@ -141,10 +141,10 @@ def generate_samples(
 
     # Shapes are: torch.Size([2, (1), 1, 28, 28]), torch.Size([2, (1), 1, 28, 28]), torch.Size([2, (1), 128, 7, 7]), torch.Size([2, (1), 128, 7, 7])
     # the (1) means that the size has been squeezed
-    gen1im = torch.stack(gen1ims, dim=0).squeeze(1)
-    gen2im = torch.stack(gen2ims, dim=0).squeeze(1)
-    gen1lat = torch.stack(gen1lats, dim=0).squeeze(1)
-    gen2lat = torch.stack(gen2lats, dim=0).squeeze(1)
+    gen1im = torch.stack(gen1ims, dim=0)
+    gen2im = torch.stack(gen2ims, dim=0)
+    gen1lat = torch.stack(gen1lats, dim=0)
+    gen2lat = torch.stack(gen2lats, dim=0)
 
     return (gen1im, gen2im), (gen1lat, gen2lat)
 

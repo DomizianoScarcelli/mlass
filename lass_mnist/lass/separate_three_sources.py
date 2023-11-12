@@ -171,12 +171,12 @@ def generate_samples(
 
     # Shapes are: torch.Size([2, (1), 1, 28, 28]), torch.Size([2, (1), 1, 28, 28]), torch.Size([2, (1), 128, 7, 7]), torch.Size([2, (1), 128, 7, 7])
     # the (1) means that the size has been squeezed
-    gen1im = torch.stack(gen1ims, dim=0).squeeze(1)
-    gen2im = torch.stack(gen2ims, dim=0).squeeze(1)
-    gen3im = torch.stack(gen3ims, dim=0).squeeze(1)
-    gen1lat = torch.stack(gen1lats, dim=0).squeeze(1)
-    gen2lat = torch.stack(gen2lats, dim=0).squeeze(1)
-    gen3lat = torch.stack(gen3lats, dim=0).squeeze(1)
+    gen1im = torch.stack(gen1ims, dim=0)
+    gen2im = torch.stack(gen2ims, dim=0)
+    gen3im = torch.stack(gen3ims, dim=0)
+    gen1lat = torch.stack(gen1lats, dim=0)
+    gen2lat = torch.stack(gen2lats, dim=0)
+    gen3lat = torch.stack(gen3lats, dim=0)
 
     return (gen1im, gen2im, gen3im), (gen1lat, gen2lat, gen3lat)
 
@@ -314,16 +314,16 @@ def main(cfg):
         print(
             f"The psnr before refining for batch {i} is {psnr}")
 
-        print(f"Refining latents for batch {i}")
-        gen1, gen2, gen3 = refine_latents_three(
-            model,
-            gen1lat,
-            gen2lat,
-            gen3lat,
-            gtm,
-            n_iterations=500,
-            learning_rate=1e-1,
-        )
+        # print(f"Refining latents for batch {i}")
+        # gen1, gen2, gen3 = refine_latents_three(
+        #     model,
+        #     gen1lat,
+        #     gen2lat,
+        #     gen3lat,
+        #     gtm,
+        #     n_iterations=500,
+        #     learning_rate=1e-1,
+        # )
 
         for j in range(len(gen1)):
             img_idx = i * cfg.batch_size + j
