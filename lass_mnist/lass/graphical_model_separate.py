@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 import shutil
-from typing import Tuple, List, Any, Optional, Callable
+from typing import Tuple, List, Any, Optional, Callable, Literal
 
 import hydra
 import torch
@@ -14,6 +14,7 @@ import random
 from ..modules import VectorQuantizedVAE
 from .utils import refine_latents, CONFIG_DIR, ROOT_DIR, CONFIG_STORE
 from .diba_interaces import UnconditionedTransformerPrior, DenseLikelihood
+from ...diba.diba.naive_separation import gm_separate
 import multiprocessing as mp
 from typing import Sequence
 from numpy.random import default_rng
@@ -42,7 +43,7 @@ def seed_worker(worker_id):
     random.seed(worker_seed)
 
 
-def psnr_grayscale(target, preds, reduction="elementwise_mean", dim=None):
+def psnr_grayscale(target, preds, reduction: Literal["elementwise_mean", "sum", "none"] | None ="elementwise_mean", dim=None):
     return torchmetrics.functional.peak_signal_noise_ratio(preds, target, data_range=1.0, reduction=reduction, dim=dim)
 
 
@@ -116,10 +117,8 @@ def generate_samples(
     gen1ims, gen2ims = [], []
     gen1lats, gen2lats = [], []
     for bi in tqdm.tqdm(range(batch_size), desc="separating"):
-        # print(f"I'm using the separation method: {separation_method}")
-        r0, r1 = separation_method(
+        r0, r1 = gm_separate(
             priors=[p0, p1],
-            likelihood=likelihood,
             mixture=codes_mixture[bi],
         )
 
@@ -260,7 +259,6 @@ def main(cfg):
             gts=[gt1, gt2],
             bos=[labels1, labels2],
             latent_length=cfg.latent_length,
-            separation_method=hydra.utils.instantiate(cfg.separation_method)
         )
 
         psnr = batched_psnr_unconditional(gts=[gt1, gt2], gens=[gen1, gen2])

@@ -28,7 +28,8 @@ def _check_if_nan_or_inf(tensor: torch.Tensor) -> bool:
 
 def sample(mixture_t: int,
            priors: List[UnconditionedTransformerPrior],
-           sources: int, past_z: torch.Tensor,
+           sources: int,
+           past_z: torch.Tensor,
            likelihood: torch.Tensor):
     samples_t = []
     for i in range(sources):

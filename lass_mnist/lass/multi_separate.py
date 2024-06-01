@@ -5,7 +5,7 @@ NOTE: for now, since I don't want to modify the dataset loader to have multiple 
 to separate.
 """
 from dataclasses import dataclass, field
-from typing import Tuple, List, Any, Optional, Mapping, Callable
+from typing import Tuple, List, Any, Optional, Mapping, Callable, Literal
 
 import shutil
 import hydra
@@ -51,7 +51,7 @@ def seed_worker(worker_id):
     random.seed(worker_seed)
 
 
-def psnr_grayscale(target, preds, reduction="elementwise_mean", dim=None):
+def psnr_grayscale(target, preds, reduction: Literal["elementwise_mean", "sum", "none"] | None ="elementwise_mean", dim=None):
     return torchmetrics.functional.peak_signal_noise_ratio(
         preds, target, data_range=1.0, reduction=reduction, dim=dim)
 
