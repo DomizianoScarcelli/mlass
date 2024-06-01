@@ -45,16 +45,7 @@ def train(data_loader, sums, model, args, writer, step):
         with torch.no_grad():
             z_e_xs = [model(images)[1] for images in source_images]
             z_e_mixtures = [model(image_mixture)[1] for image_mixture in images_mixtures]
-            # z_e_xs = []
-            # z_e_mixtures = []
-            # for images in source_images:
-            #     _, z_e_x, _ = model(images)
-            #     z_e_xs.append(z_e_x)
 
-            # for image_mixture in images_mixtures:
-            #     _, z_e_mixture, _ = model(image_mixture)
-            #     z_e_mixtures.append(z_e_mixture)
-            
         codes = [model.codeBook(z_e_x) for z_e_x in z_e_xs]
         codes_mixtures = [model.codeBook(z_e_x_mixture) for z_e_x_mixture in z_e_mixtures]
 
@@ -67,7 +58,6 @@ def train(data_loader, sums, model, args, writer, step):
             else:
                 sums[i, codes_mixtures[i], codes_mixtures[i-1], codes[i]] += 1
         
-
         step += 1
     return step
 
