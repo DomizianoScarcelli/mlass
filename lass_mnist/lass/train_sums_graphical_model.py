@@ -35,11 +35,11 @@ def get_mixtures(images: torch.Tensor) -> torch.Tensor:
 def train(data_loader, sums, model, args, writer, step):
     for images, _ in tqdm(data_loader, desc="Training sums"):
         images = images.to(args.device)
-        # Shape: torch.Size([3, 21, 1, 28, 28] for NUM_SOURCES=3
+        #torch.Size([3, 21, 1, 28, 28]) for NUM_SOURCES 3
         source_images = split_images_by_step(images, args.batch_size, step=NUM_SOURCES)
         # List of n tensors, each one is $m_i$, the mixture at step i, meaning
         # the mixture of the images 0,1,...,i-1
-        # Shape: torch.Size([3, 21, 1, 28, 28] for NUM_SOURCES=3
+        # torch.Size([3, 21, 1, 28, 28]) for NUM_SOURCES 3
         images_mixtures = get_mixtures(images=source_images)
 
         with torch.no_grad():
@@ -57,34 +57,40 @@ def train(data_loader, sums, model, args, writer, step):
                 sums[i, codes_mixtures[i], torch.zeros_like(codes[i]), codes[i]] += 1
             else:
                 sums[i, codes_mixtures[i], codes_mixtures[i-1], codes[i]] += 1
-        
         step += 1
     return step
 
 
 def evaluate(data_loader, sums, model, args, writer, step):
-    sums_test = sums / (torch.sum(sums) + 1e-16)
     with torch.no_grad():
         loss = 0.0
-        for images, _ in data_loader:
+        sums_test = sums / torch.sum(sums) + 1e-16
+        for images, _ in tqdm(data_loader, desc="Evaluating sums"):
             images = images.to(args.device)
-            images1 = images[: 16 // 2]
-            images2 = images[16 // 2 :]
-            images_mixture = 0.5 * images1 + 0.5 * images2
+            # Shape: torch.Size([3, 21, 1, 28, 28]) for NUM_SOURCES=3
+            source_images = split_images_by_step(images, 16, step=NUM_SOURCES)
+            # List of n tensors, each one is $m_i$, the mixture at step i, meaning
+            # the mixture of the images 0,1,...,i-1
+            # Shape: torch.Size([3, 21, 1, 28, 28]) for NUM_SOURCES=3
+            images_mixtures = get_mixtures(images=source_images)
 
-            with torch.no_grad():
-                _, z_e_x1, _ = model(images1)
-                _, z_e_x2, _ = model(images2)
-                _, z_e_x_mixture, _ = model(images_mixture)
-                codes1 = model.codeBook(z_e_x1)
-                codes2 = model.codeBook(z_e_x2)
-                codes_mixture = model.codeBook(z_e_x_mixture)
-                loss += torch.mean(-torch.log(sums_test[codes1, codes2, codes_mixture] + 1e-16))
+            z_e_xs = [model(images)[1] for images in source_images]
+            z_e_mixtures = [model(image_mixture)[1] for image_mixture in images_mixtures]
 
-        loss /= len(data_loader)
-    # Logs
-    writer.add_scalar("loss/test/loss", loss.item(), step)
+            codes = [model.codeBook(z_e_x) for z_e_x in z_e_xs]
+            codes_mixtures = [model.codeBook(z_e_x_mixture) for z_e_x_mixture in z_e_mixtures]
 
+            codes = torch.stack([code.flatten() for code in codes], dim=0)
+            codes_mixtures = torch.stack([code.flatten() for code in codes_mixtures], dim=0)
+                            
+            for i in range(NUM_SOURCES):
+                if i == 0:
+                    loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], torch.zeros_like(codes[i]), codes[i]]))
+                else:
+                    loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes_mixtures[i-1], codes[i]]))
+
+        loss /= len(data_loader)         
+        writer.add_scalar("loss/test/loss", loss.item(), step)
     return loss.item()
 
 
