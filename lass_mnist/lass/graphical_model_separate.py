@@ -14,7 +14,7 @@ import random
 from ..modules import VectorQuantizedVAE
 from .utils import refine_latents, CONFIG_DIR, ROOT_DIR, CONFIG_STORE
 from .diba_interaces import UnconditionedTransformerPrior, DenseLikelihood
-from ...diba.diba.naive_separation import gm_separate
+from diba.diba.graphical_model import DirectedGraphicalModel
 import multiprocessing as mp
 from typing import Sequence
 from numpy.random import default_rng
@@ -43,7 +43,7 @@ def seed_worker(worker_id):
     random.seed(worker_seed)
 
 
-def psnr_grayscale(target, preds, reduction: Literal["elementwise_mean", "sum", "none"] | None ="elementwise_mean", dim=None):
+def psnr_grayscale(target, preds, reduction: Optional[Literal["elementwise_mean", "sum", "none"]] ="elementwise_mean", dim=None):
     return torchmetrics.functional.peak_signal_noise_ratio(preds, target, data_range=1.0, reduction=reduction, dim=dim)
 
 
@@ -88,8 +88,7 @@ def select_closest_to_mixture(
 @torch.no_grad()
 def generate_samples(
     model: VectorQuantizedVAE,
-    transformer: GPT2LMHeadModel,
-    sums: torch.Tensor,
+    graphical_model: DirectedGraphicalModel,
     gts: Tuple[torch.Tensor, torch.Tensor],
     bos: Tuple[int, int],
     latent_length: int,
@@ -107,20 +106,10 @@ def generate_samples(
     codes_mixture = codes_mixture.view(
         batch_size, latent_length ** 2).tolist()  # (B, H**2)
 
-    # instantiate diba interface
-    label0, label1 = bos
-    p0 = UnconditionedTransformerPrior(transformer=transformer, sos=0)
-    p1 = UnconditionedTransformerPrior(transformer=transformer, sos=0)
-
-    likelihood = DenseLikelihood(sums=sums)
-
     gen1ims, gen2ims = [], []
     gen1lats, gen2lats = [], []
     for bi in tqdm.tqdm(range(batch_size), desc="separating"):
-        r0, r1 = gm_separate(
-            priors=[p0, p1],
-            mixture=codes_mixture[bi],
-        )
+        r0, r1 = graphical_model.separate(mixture=codes_mixture[bi])
 
         # get separation closer to mixture
         (gen1im, gen2im), (gen1lat, gen2lat), _ = select_closest_to_mixture(
@@ -228,9 +217,8 @@ def main(cfg):
     with open(cfg.checkpoints.autoregressive, 'rb') as f:
         transformer.load_state_dict(torch.load(f, map_location=cfg.device))
 
-    with open(cfg.checkpoints.sums, 'rb') as f:
-        sums = torch.load(f, map_location=cfg.device)
-
+    graphical_model = DirectedGraphicalModel(transformer=transformer, 
+                                             num_sources=2)
     # set models to eval
     model.eval()
     transformer.eval()
@@ -254,8 +242,7 @@ def main(cfg):
 
         (gen1, gen2), (gen1lat, gen2lat) = generate_samples(
             model=model,
-            transformer=transformer,
-            sums=sums,
+            graphical_model=graphical_model,
             gts=[gt1, gt2],
             bos=[labels1, labels2],
             latent_length=cfg.latent_length,

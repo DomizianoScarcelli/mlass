@@ -2,6 +2,7 @@ import multiprocessing as mp
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, List
+import torch
 from tqdm import tqdm
 import hydra
 import torch
@@ -11,6 +12,7 @@ from torchvision.utils import make_grid
 from .utils import CONFIG_DIR, CONFIG_STORE, ROOT_DIR
 
 NUM_SOURCES = 3
+#TODO: last checkpoint was until epoch 62 with a loss of 27.6918 
 
 def roll(x, n):
     return torch.cat((x[:, -n:], x[:, :-n]), dim=1)
@@ -108,7 +110,7 @@ class SumsEstimationConfig:
     num_codes: int = MISSING
     batch_size: int = 64
     num_epochs: int = 500
-    output_folder: str = "sums"
+    output_folder: str = "sums-MNIST-gm"
     num_workers: int = mp.cpu_count() - 1
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -117,7 +119,7 @@ CONFIG_STORE.store(group="sums_estimation",
                    name="base_sums_estimation", node=SumsEstimationConfig)
 
 
-@hydra.main(version_base=None, config_path=CONFIG_DIR, config_name="sums_estimation/mnist.yaml")
+@hydra.main(version_base=None, config_path=CONFIG_DIR, config_name="sums_estimation/mnist-gm.yaml")
 def main(cfg):
     cfg: SumsEstimationConfig = cfg.sums_estimation
     now = datetime.now()
@@ -129,7 +131,7 @@ def main(cfg):
     (ROOT_DIR / "models" / cfg.output_folder).mkdir(exist_ok=True)
 
     writer = SummaryWriter("./logs/{0}".format(cfg.output_folder))
-    save_filename = "./lass_mnist/models/{0}".format(cfg.output_folder)
+    save_filename = f"./lass_mnist/models/{cfg.output_folder}"
 
     # Define the data loaders
     train_loader = torch.utils.data.DataLoader(
@@ -176,8 +178,9 @@ def main(cfg):
 
         if (epoch == 0) or (loss < best_loss):
             best_loss = loss
-            with open("{0}/best.pt".format(save_filename), "wb") as f:
+            with open(f"{save_filename}/best.pt", "wb") as f:
                 torch.save(sums, f)
+                print(f"Saved in {save_filename} with loss: {loss}")
 
     now = datetime.now()
     current_time = now.strftime("%H:%M:%S")

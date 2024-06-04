@@ -32,19 +32,35 @@ class DirectedGraphicalModel:
             )
             log_prior = normalize_logits(log_prior)
 
-            cpd = TabularCPD(variable=f"z{i}", variable_card=K, values=F.softmax(log_prior)) #TODO: maybe numerical instability?
+            #TODO: maybe numerical instability?
+            #TODO: I don't know the dimensionalit of the values, but in order
+            # for them to be in TabularCPD they need to be 2D, so this might need
+            # some work
+            cpd = TabularCPD(variable=f"z{i}", variable_card=K, values=F.softmax(log_prior)) 
             cpds_z.append(cpd)
 
         for i in range(1, num_sources+1):
-            #TODO: discover how to know the values
+            #TODO: the values here are the one obtained via the train_sums_graphical_model.py algorithm, import them
+            values = None
             if i == 1:
-                cpd = TabularCPD(variable=f"m{i}", variable_card=K, values=None)
-            pass
+                cpd = TabularCPD(
+                        variable=f"m{i}", 
+                        evidence=["z0", "z1"],
+                        variable_card=K,
+                        values=values,
+                        evidence_card=[K, K]) 
+            else:
+                cpd = TabularCPD(
+                        variable=f"m{i}", 
+                        evidence=[f"m{i-1}", "z{i}"],
+                        variable_card=K,
+                        values=values,
+                        evidence_card=[K, K]) 
+            cpds_m.append(cpd)
 
-
-
-
-
+        self.model.add_cpds(*cpds_z, *cpds_m)
+        assert self.model.check_model()
+        self.inference = BeliefPropagation(self.model)
 
     def forward_pass(self, m_i: torch.Tensor, z_i: torch.Tensor):
         """
