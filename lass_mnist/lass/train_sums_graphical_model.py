@@ -54,13 +54,12 @@ def train(data_loader, sums, model, args, writer, step):
         codes = torch.stack([code.flatten() for code in codes], dim=0)
         codes_mixtures = torch.stack([code.flatten() for code in codes_mixtures], dim=0)
 
-        for i in range(NUM_SOURCES):
-            #TODO: I guess this is wrong
+        for i in range(NUM_SOURCES-1):
+            #TODO: I don't know which is right
             if i == 0:
-                # sums[i, codes_mixtures[i], torch.zeros_like(codes[i]), codes[i]] += 1
-                sums[i, codes_mixtures[i], codes[i], codes[i]] += 1
+                sums[i, codes_mixtures[i], codes[i], codes[i+1]] += 1
             else:
-                sums[i, codes_mixtures[i], codes_mixtures[i-1], codes[i]] += 1
+                sums[i, codes_mixtures[i], codes_mixtures[i-1], codes[i+1]] += 1
         step += 1
     return step
 
@@ -76,6 +75,7 @@ def evaluate(data_loader, sums, model, args, writer, step):
             # List of n tensors, each one is $m_i$, the mixture at step i, meaning
             # the mixture of the images 0,1,...,i-1
             # Shape: torch.Size([3, 21, 1, 28, 28]) for NUM_SOURCES=3
+            # print(results)
             images_mixtures = get_mixtures(images=source_images)
 
             z_e_xs = [model(images)[1] for images in source_images]
@@ -87,11 +87,11 @@ def evaluate(data_loader, sums, model, args, writer, step):
             codes = torch.stack([code.flatten() for code in codes], dim=0)
             codes_mixtures = torch.stack([code.flatten() for code in codes_mixtures], dim=0)
                             
-            for i in range(NUM_SOURCES):
+            for i in range(NUM_SOURCES-1):
                 if i == 0:
-                    loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], torch.zeros_like(codes[i]), codes[i]]))
+                    loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes[i], codes[i+1]]))
                 else:
-                    loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes_mixtures[i-1], codes[i]]))
+                    loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes_mixtures[i-1], codes[i+1]]))
 
         loss /= len(data_loader)         
         writer.add_scalar("loss/test/loss", loss.item(), step)

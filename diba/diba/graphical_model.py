@@ -48,7 +48,9 @@ class DirectedGraphicalModel:
         """
         It computes the message μα in the graphical model forward pass.
         """
-        #TODO: final shape should be [256,256] but now is [49,2]
+        #TODO: apart from updating the shapes, you should also re-consider the
+        # whole thing, since the forward pass is only defined at i > 0, while
+        # the backward pass is defined at all indices with i != num_sources.
 
         # shape is [256, 256, 256] = [K, K, K]
         curr_p_mmz = self.p_mmzs[i]
@@ -87,7 +89,7 @@ class DirectedGraphicalModel:
             return final_message
 
         #shape: [2]
-        message = torch.logsumexp(self.p_zs[i+1], dim=0) #TODO: don't know over which dimension should I sum
+        message = torch.logsumexp(self.p_zs[i+1], dim=0) 
         print(f"backward message shape: {message.shape}")
         return message
     
@@ -96,7 +98,7 @@ class DirectedGraphicalModel:
         print(f"{i} forward shape: {self.forward_results[i].shape}")
         print(f"{i} backward shape: {self.backward_results[i].shape}")
         if i == 0:
-            return self.p_zs[i]
+            return self.p_zs[i]*self.backward_results[i]
         else:
             past_message = torch.logsumexp(self.forward_results[i] + self.backward_results[i], dim=0)
             message = self.p_zs[i] + past_message
@@ -106,14 +108,16 @@ class DirectedGraphicalModel:
         # sample i times
         results = torch.full((2, self.K, len(mixture)),
                             fill_value=-1, dtype=torch.long)
-        print(f"marginal results shape: {self.marginal_results[1].T.shape}")
         for i in range(len(mixture)):
-            s0 = torch.distributions.Categorical(logits=self.marginal_results[0][:,i]).sample()
-            s1 = torch.distributions.Categorical(logits=self.marginal_results[1][:,i]).sample()
+            # print(f"marginal_results shape: {self.marginal_results[0][i].shape}")
+            # print(f"marginal_results shape: {self.marginal_results[0][:,i].shape}")
+            # print(f"first sample shape is: {torch.distributions.Categorical(logits=self.marginal_results[0]).sample().shape}")
+            # print(f"second sample shape is: {torch.distributions.Categorical(logits=self.marginal_results[0]).sample().shape}")
+            s0 = torch.distributions.Categorical(logits=self.marginal_results[0][:, i]).sample()
+            s1 = torch.distributions.Categorical(logits=self.marginal_results[1][:, i]).sample()
             print(s0,s1)
             results[0,:,i] = s0
             results[1,:,i] = s1
-            print(results)
         results = results.long()
         print(f"results: {results}")
         return results
