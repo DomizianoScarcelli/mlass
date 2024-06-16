@@ -16,8 +16,8 @@ class DirectedGraphicalModel:
                  transformer: GPT2LMHeadModel,
                  num_sources:int):
         # Defining the strucure of the model
-        K = 256 #possible discrete values in the latent codes
-        past = torch.zeros((num_sources, K, 1)).long()
+        self.K = 256 #possible discrete values in the latent codes
+        past = torch.zeros((num_sources, self.K, 1)).long()
         self.num_sources = num_sources
 
         #autoregressive priors
@@ -40,10 +40,9 @@ class DirectedGraphicalModel:
         # p_mmzs[i] = p(m_i | m{i-1}, z_i)
         p_mmzs_path = "./lass_mnist/models/sums-MNIST-gm/best.pt"
         with open(p_mmzs_path, "rb") as f:
-            self.p_mmzs = torch.log(torch.load(f))
+            self.p_mmzs = torch.log(torch.load(f) + 1e-10)
+            print(self.p_mmzs)
             print(f"p_mmzs has shape: {self.p_mmzs.shape}")
-
-
 
     def forward_pass(self, i: int, mixture: torch.Tensor):
         """
@@ -51,7 +50,7 @@ class DirectedGraphicalModel:
         """
         #TODO: final shape should be [256,256] but now is [49,2]
 
-        # shape is [256, 256, 256] = [mixture_length, K, K]
+        # shape is [256, 256, 256] = [K, K, K]
         curr_p_mmz = self.p_mmzs[i]
         # shape is [2, 256] = [num_sources, K]
         curr_p_z = self.p_zs[i]
@@ -105,17 +104,19 @@ class DirectedGraphicalModel:
 
     def sample(self, mixture) -> torch.Tensor:
         # sample i times
-        #TODO: don't hardcode the K
-
-        results = torch.zeros(self.num_sources, 256, len(mixture))
+        results = torch.full((2, self.K, len(mixture)),
+                            fill_value=-1, dtype=torch.long)
+        print(f"marginal results shape: {self.marginal_results[1].T.shape}")
         for i in range(len(mixture)):
-            s0 = torch.distributions.Categorical(logits=self.marginal_results[0]).sample()
-            s1 = torch.distributions.Categorical(logits=self.marginal_results[1]).sample()
-            # print(f"s0 shape: {s0.shape}")
-            # print(f"s1 shape: {s1.shape}")
+            s0 = torch.distributions.Categorical(logits=self.marginal_results[0][:,i]).sample()
+            s1 = torch.distributions.Categorical(logits=self.marginal_results[1][:,i]).sample()
+            print(s0,s1)
             results[0,:,i] = s0
             results[1,:,i] = s1
-        return results.long()
+            print(results)
+        results = results.long()
+        print(f"results: {results}")
+        return results
         
 
         

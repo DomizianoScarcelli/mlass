@@ -11,7 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision.utils import make_grid
 from .utils import CONFIG_DIR, CONFIG_STORE, ROOT_DIR
 
-NUM_SOURCES = 3
+NUM_SOURCES = 2
 #TODO: last checkpoint was until epoch 62 with a loss of 27.6918 
 
 def roll(x, n):
@@ -55,8 +55,10 @@ def train(data_loader, sums, model, args, writer, step):
         codes_mixtures = torch.stack([code.flatten() for code in codes_mixtures], dim=0)
 
         for i in range(NUM_SOURCES):
+            #TODO: I guess this is wrong
             if i == 0:
-                sums[i, codes_mixtures[i], torch.zeros_like(codes[i]), codes[i]] += 1
+                # sums[i, codes_mixtures[i], torch.zeros_like(codes[i]), codes[i]] += 1
+                sums[i, codes_mixtures[i], codes[i], codes[i]] += 1
             else:
                 sums[i, codes_mixtures[i], codes_mixtures[i-1], codes[i]] += 1
         step += 1
