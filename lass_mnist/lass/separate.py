@@ -122,7 +122,7 @@ def generate_samples(
             likelihood=likelihood,
             mixture=codes_mixture[bi],
         )
-
+        print(r0,r1)
         # get separation closer to mixture
         (gen1im, gen2im), (gen1lat, gen2lat), _ = select_closest_to_mixture(
             vqvae=model,

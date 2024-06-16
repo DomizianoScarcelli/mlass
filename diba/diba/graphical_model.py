@@ -17,7 +17,7 @@ class DirectedGraphicalModel:
                  num_sources:int):
         # Defining the strucure of the model
         K = 256 #possible discrete values in the latent codes
-        past = torch.zeros((K, K, 1)).long()
+        past = torch.zeros((num_sources, K, 1)).long()
         self.num_sources = num_sources
 
         #autoregressive priors
@@ -30,17 +30,17 @@ class DirectedGraphicalModel:
         self.p_zs = []
         for i in range(num_sources):
             log_prior, _ = priors[i].get_logits(
-                token_ids=past,
+                token_ids=past[i],
                 past_key_values=None,
             )
             log_prior = normalize_logits(log_prior).squeeze()
             print(f"log_prior {i} has shape {log_prior.shape}")
-            self.p_zs.append(F.softmax(log_prior))
+            self.p_zs.append(log_prior)
         
         # p_mmzs[i] = p(m_i | m{i-1}, z_i)
         p_mmzs_path = "./lass_mnist/models/sums-MNIST-gm/best.pt"
         with open(p_mmzs_path, "rb") as f:
-            self.p_mmzs = torch.load(f)
+            self.p_mmzs = torch.log(torch.load(f))
             print(f"p_mmzs has shape: {self.p_mmzs.shape}")
 
 
@@ -61,16 +61,16 @@ class DirectedGraphicalModel:
             # shape before sum is [mixture_length, K, num_sources]
             # shape after sum is [mixture_length, num_sources]
             # message = torch.sum(curr_p_mmz @ curr_p_z.T, dim=1)
-            message = torch.sum(curr_p_mmz * curr_p_z, dim=1)
+            message = torch.logsumexp(curr_p_mmz + curr_p_z, dim=1)
             print(f"message shape is: {message.shape}")
             return message
         #shape [49,2]
-        new_message = torch.sum(curr_p_mmz * curr_p_z, dim=1)
+        new_message = torch.logsumexp(curr_p_mmz + curr_p_z, dim=1)
         # shape: [49, 1]
-        old_message = torch.sum(self.p_zs[i-1] * self.forward_results[i-1], dim=0)
+        old_message = torch.logsumexp(self.p_zs[i-1] + self.forward_results[i-1], dim=0)
         # print(f"old message shape is: {old_message.shape}")
         # shape: [49,2]
-        final_message = new_message * old_message
+        final_message = new_message + old_message
         # print(f"final message shape is {final_message.shape}")
         return final_message
 
@@ -80,15 +80,15 @@ class DirectedGraphicalModel:
         """
         print(f"backward: currently on i: {i}")
         if i == -1:
-            message = torch.sum(self.p_zs[i+1], dim=0) #shape should be K
-            old_message = torch.sum(self.p_mmzs[i+1] * self.backward_results[i+2], dim=0)
+            message = torch.logsumexp(self.p_zs[i+1], dim=0) #shape should be K
+            old_message = torch.logsumexp(self.p_mmzs[i+1] + self.backward_results[i+2], dim=0)
             print(f"backward old_message shape: {old_message.shape}")
-            final_message = message * old_message
+            final_message = message + old_message
             print(f"backward final_message shape: {final_message.shape}")
             return final_message
 
         #shape: [2]
-        message = torch.sum(self.p_zs[i+1], dim=0) #TODO: don't know over which dimension should I sum
+        message = torch.logsumexp(self.p_zs[i+1], dim=0) #TODO: don't know over which dimension should I sum
         print(f"backward message shape: {message.shape}")
         return message
     
@@ -99,9 +99,26 @@ class DirectedGraphicalModel:
         if i == 0:
             return self.p_zs[i]
         else:
-            past_message = torch.sum(self.forward_results[i] * self.backward_results[i], dim=0)
-            message = self.p_zs[i] * past_message
+            past_message = torch.logsumexp(self.forward_results[i] + self.backward_results[i], dim=0)
+            message = self.p_zs[i] + past_message
             return message
+
+    def sample(self, mixture) -> torch.Tensor:
+        # sample i times
+        #TODO: don't hardcode the K
+
+        results = torch.zeros(self.num_sources, 256, len(mixture))
+        for i in range(len(mixture)):
+            s0 = torch.distributions.Categorical(logits=self.marginal_results[0]).sample()
+            s1 = torch.distributions.Categorical(logits=self.marginal_results[1]).sample()
+            # print(f"s0 shape: {s0.shape}")
+            # print(f"s1 shape: {s1.shape}")
+            results[0,:,i] = s0
+            results[1,:,i] = s1
+        return results.long()
+        
+
+        
     
     def separate(self, mixture: torch.Tensor):
         self.forward_results = []
@@ -122,9 +139,13 @@ class DirectedGraphicalModel:
             marginal = self.compute_marginals(i)
             self.marginal_results.append(marginal)
 
+        # marginals = torch.stack(self.marginal_results)[:, :, mixture].long()
         marginals = torch.stack(self.marginal_results)
+        # This should have shape 2,256,256
         print(f"marginal shape: {marginals.shape}")
-        return marginals
+        # This should have shape 2,256,49
+        result = self.sample(mixture)
+        return result
 
 
 
