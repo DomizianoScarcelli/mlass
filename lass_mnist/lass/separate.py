@@ -274,7 +274,7 @@ def main(cfg):
             gen1lat,
             gen2lat,
             gtm,
-            n_iterations=500,
+            n_iterations=1,#TODO: put it back to 500, now just to see the real performances
             learning_rate=1e-1,
         )
 

@@ -89,10 +89,9 @@ class DirectedGraphicalModel:
 
     def sample(self, marginals, mixture) -> torch.Tensor:
         results = torch.full((2, len(mixture)),fill_value=-1, dtype=torch.long)
-        s0 = torch.distributions.Categorical(logits=marginals[0].T[mixture]).sample()
-        s1 = torch.distributions.Categorical(logits=marginals[1].T[mixture]).sample()
-        results[0] = s0
-        results[1] = s1
+        print(f"marginals shape is: {marginals.shape}")
+        results = torch.distributions.Categorical(logits=marginals[:, :, mixture].permute(0,2,1)).sample()
+        print(f"sample shape is: {results.shape}")
         return results.long()
     
     def separate(self, mixture: torch.Tensor):
