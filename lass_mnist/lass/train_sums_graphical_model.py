@@ -12,7 +12,6 @@ from torchvision.utils import make_grid
 from .utils import CONFIG_DIR, CONFIG_STORE, ROOT_DIR
 
 NUM_SOURCES = 2
-#TODO: last checkpoint was until epoch 62 with a loss of 27.6918 
 
 def roll(x, n):
     return torch.cat((x[:, -n:], x[:, :-n]), dim=1)
@@ -23,7 +22,8 @@ def split_images_by_step(images: torch.Tensor, batch_size: int, step: int) -> to
     for i in range(len(images) // batched_images_size):
         image_batches.append(
             images[i * batched_images_size: (i + 1) * batched_images_size])
-    return torch.stack(image_batches)
+    result = torch.stack(image_batches)
+    return result
 
 def get_mixtures(images: torch.Tensor) -> torch.Tensor:
     mixtures = []
@@ -50,7 +50,7 @@ def train(data_loader, sums, model, args, writer, step):
 
         codes = [model.codeBook(z_e_x) for z_e_x in z_e_xs]
         codes_mixtures = [model.codeBook(z_e_x_mixture) for z_e_x_mixture in z_e_mixtures]
-
+        
         codes = torch.stack([code.flatten() for code in codes], dim=0)
         codes_mixtures = torch.stack([code.flatten() for code in codes_mixtures], dim=0)
 
@@ -58,8 +58,10 @@ def train(data_loader, sums, model, args, writer, step):
             #TODO: I don't know which is right
             if i == 0:
                 sums[i, codes_mixtures[i], codes[i], codes[i+1]] += 1
+                sums[i, codes_mixtures[i], codes[i+1], codes[i]] += 1
             else:
                 sums[i, codes_mixtures[i], codes_mixtures[i-1], codes[i+1]] += 1
+                sums[i, codes_mixtures[i], codes[i+1], codes_mixtures[i-1]] += 1
         step += 1
     return step
 
@@ -90,8 +92,10 @@ def evaluate(data_loader, sums, model, args, writer, step):
             for i in range(NUM_SOURCES-1):
                 if i == 0:
                     loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes[i], codes[i+1]]))
+                    loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes[i+1], codes[i]]))
                 else:
                     loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes_mixtures[i-1], codes[i+1]]))
+                    loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes[i+1], codes_mixtures[i-1]]))
 
         loss /= len(data_loader)         
         writer.add_scalar("loss/test/loss", loss.item(), step)
@@ -110,7 +114,7 @@ class SumsEstimationConfig:
     )
     vqvae_checkpoint: str = "lass_mnist/checkpoints/vqvae/256-sigmoid-big.pt"
     num_codes: int = MISSING
-    batch_size: int = 64
+    batch_size: int = 128
     num_epochs: int = 500
     output_folder: str = "sums-MNIST-gm"
     num_workers: int = mp.cpu_count() - 1

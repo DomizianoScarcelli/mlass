@@ -1,4 +1,3 @@
-
 import torch
 from lass_mnist.lass.diba_interaces import UnconditionedTransformerPrior
 from typing import List, Optional
@@ -15,7 +14,6 @@ class DirectedGraphicalModel:
     def __init__(self, 
                  transformer: GPT2LMHeadModel,
                  num_sources:int):
-        # Defining the strucure of the model
         self.K = 256 #possible discrete values in the latent codes
         past = torch.zeros((num_sources, self.K, 1)).long()
         self.num_sources = num_sources
@@ -40,7 +38,7 @@ class DirectedGraphicalModel:
         # p_mmzs[i] = p(m_i | m{i-1}, z_i)
         p_mmzs_path = "./lass_mnist/models/sums-MNIST-gm/best.pt"
         with open(p_mmzs_path, "rb") as f:
-            self.p_mmzs = torch.log(torch.load(f) + 1e-10)
+            self.p_mmzs = torch.log(torch.load(f) + 1e-16)
             print(f"p_mmzs has shape: {self.p_mmzs.shape}")
 
     def forward_pass(self, i: int, mixture: torch.Tensor):
@@ -52,15 +50,15 @@ class DirectedGraphicalModel:
         # the backward pass is defined at all indices with i != num_sources.
 
         # shape is [256, 256, 256] = [K, K, K]
-        curr_p_mmz = self.p_mmzs[i-1]
+        curr_p_mmz = self.p_mmzs[i]
         # shape is [2, 256] = [num_sources, K]
         curr_p_z = self.p_zs[i]
-        if i == 1:
+        if i == 0:
             message = torch.logsumexp(curr_p_mmz + curr_p_z, dim=1)
-            print(f"message shape is: {message.shape}")
+            # print(f"message shape is: {message.shape}")
             return message
         new_message = torch.logsumexp(curr_p_mmz + curr_p_z, dim=1)
-        old_message = torch.logsumexp(self.p_zs[i-1] + self.forward_results[i-1], dim=0)
+        old_message = torch.logsumexp(self.p_zs[i] + self.forward_results[i-1], dim=1)
         final_message = new_message + old_message
         return final_message
 
@@ -68,64 +66,59 @@ class DirectedGraphicalModel:
         """
         It computes the message μβ in the graphical model backward pass.
         """
-        print(f"backward: currently on i: {i}")
+        # print(f"backward: currently on i: {i}")
         if i == self.num_sources-1:
-            message = torch.logsumexp(self.p_zs[i+1], dim=0) #shape should be K
+            message = torch.logsumexp(self.p_zs[i+1], dim=0) + torch.logsumexp(self.p_mmzs[i], dim=0)
             old_message = torch.logsumexp(self.p_mmzs[i+1] + self.backward_results[i+2], dim=0)
-            print(f"backward old_message shape: {old_message.shape}")
+            # print(f"backward old_message shape: {old_message.shape}")
             final_message = message + old_message
-            print(f"backward final_message shape: {final_message.shape}")
+            # print(f"backward final_message shape: {final_message.shape}")
             return final_message
-
-        message = torch.logsumexp(self.p_zs[i+1], dim=0) 
-        print(f"backward message shape: {message.shape}")
+        
+        #TODO: I don't know about the pmmzs index (i or i+1?)
+        message = torch.logsumexp(self.p_zs[i+1], dim=0) + torch.logsumexp(self.p_mmzs[i+1], dim=0)
+        # print(f"backward message shape: {message.shape}")
         return message
     
     def compute_marginals(self, i: int) -> torch.Tensor:
         if i == 0:
             return self.p_zs[i]*self.backward_results[i]
         elif i == self.num_sources-1:
-            return self.p_zs[i]*self.forward_results[i]
+            return self.p_zs[i]*self.forward_results[i-1]
         else:
-            return self.p_zs + torch.logsumexp(self.forward_results[i] + self.backward_results[i], dim=0)
+            return self.p_zs + torch.logsumexp(self.forward_results[i-1] + self.backward_results[i], dim=0)
 
-    def sample(self, mixture) -> torch.Tensor:
+    def sample(self, marginals, mixture) -> torch.Tensor:
         results = torch.full((2, len(mixture)),fill_value=-1, dtype=torch.long)
-        s0 = torch.distributions.Categorical(logits=self.marginal_results[0].T[mixture]).sample()
-        s1 = torch.distributions.Categorical(logits=self.marginal_results[1].T[mixture]).sample()
-        print(s0,s1)
-        print(s0.shape,s1.shape)
+        s0 = torch.distributions.Categorical(logits=marginals[0].T[mixture]).sample()
+        s1 = torch.distributions.Categorical(logits=marginals[1].T[mixture]).sample()
+        # print(s0,s1)
+        # print(s0.shape,s1.shape)
         results[0] = s0
         results[1] = s1
-        results = results.long()
-        print(f"results: {results}")
-        return results
+        return results.long()
     
     def separate(self, mixture: torch.Tensor):
-        self.forward_results = [None]
+        self.forward_results: List[Optional[torch.Tensor]] = []
         self.backward_results: List[Optional[torch.Tensor]] = [None for _ in range(self.num_sources-1)]
         self.marginal_results = []
-        for i in range(1,self.num_sources):
+        for i in range(self.num_sources-1):
             forward = self.forward_pass(i, mixture)
             self.forward_results.append(forward)
         
         backward_range = list(reversed([i for i in range(self.num_sources-1)]))
-        print(f"Initializing backward pass on the sequence: {backward_range}")
+        # print(f"Initializing backward pass on the sequence: {backward_range}")
         for i in backward_range: 
             backward = self.backward_pass(i, mixture)
             self.backward_results[i] = backward
-            print([f"Full: {elem.shape}" if elem is not None else "Empty" for elem in self.backward_results])
+            # print([f"Full: {elem.shape}" if elem is not None else "Empty" for elem in self.backward_results])
         
         for i in range(self.num_sources):
             marginal = self.compute_marginals(i)
             self.marginal_results.append(marginal)
 
-        # marginals = torch.stack(self.marginal_results)[:, :, mixture].long()
         marginals = torch.stack(self.marginal_results)
-        # This should have shape 2,256,256
-        print(f"marginal shape: {marginals.shape}")
-        # This should have shape 2,256,49
-        result = self.sample(mixture)
+        result = self.sample(marginals, mixture)
         return result
 
 
