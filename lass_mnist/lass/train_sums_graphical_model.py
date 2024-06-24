@@ -27,7 +27,7 @@ def split_images_by_step(images: torch.Tensor, batch_size: int, step: int) -> to
 
 def get_mixtures(images: torch.Tensor) -> torch.Tensor:
     mixtures = []
-    for i in range(len(images)):
+    for i in range(2, len(images)+1):
         # Build the mixtures of the images up to index i
         mixture = torch.mean(images[:i], dim=0)
         mixtures.append(mixture)

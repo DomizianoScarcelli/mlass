@@ -68,6 +68,7 @@ class DirectedGraphicalModel:
         """
         # print(f"backward: currently on i: {i}")
         if i == self.num_sources-1:
+            #TODO: see better the axis where to perform logsumexp
             message = torch.logsumexp(self.p_zs[i+1], dim=0) + torch.logsumexp(self.p_mmzs[i], dim=0)
             old_message = torch.logsumexp(self.p_mmzs[i+1] + self.backward_results[i+2], dim=0)
             # print(f"backward old_message shape: {old_message.shape}")
@@ -75,9 +76,7 @@ class DirectedGraphicalModel:
             # print(f"backward final_message shape: {final_message.shape}")
             return final_message
         
-        #TODO: I don't know about the pmmzs index (i or i+1?)
-        message = torch.logsumexp(self.p_zs[i+1], dim=0) + torch.logsumexp(self.p_mmzs[i+1], dim=0)
-        # print(f"backward message shape: {message.shape}")
+        message = torch.logsumexp(self.p_zs[i+1], dim=0) + torch.logsumexp(self.p_mmzs[i], dim=-1)
         return message
     
     def compute_marginals(self, i: int) -> torch.Tensor:
@@ -86,14 +85,12 @@ class DirectedGraphicalModel:
         elif i == self.num_sources-1:
             return self.p_zs[i]*self.forward_results[i-1]
         else:
-            return self.p_zs + torch.logsumexp(self.forward_results[i-1] + self.backward_results[i], dim=0)
+            return self.p_zs[i] + torch.logsumexp(self.forward_results[i-1] + self.backward_results[i], dim=0)
 
     def sample(self, marginals, mixture) -> torch.Tensor:
         results = torch.full((2, len(mixture)),fill_value=-1, dtype=torch.long)
         s0 = torch.distributions.Categorical(logits=marginals[0].T[mixture]).sample()
         s1 = torch.distributions.Categorical(logits=marginals[1].T[mixture]).sample()
-        # print(s0,s1)
-        # print(s0.shape,s1.shape)
         results[0] = s0
         results[1] = s1
         return results.long()
