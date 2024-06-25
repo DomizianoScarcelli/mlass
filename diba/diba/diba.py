@@ -374,8 +374,12 @@ def _sample(posterior_data: torch.Tensor, coords: torch.LongTensor) -> Tuple[tor
     assert nnz_coords == nnz_posterior
 
     samples = torch.distributions.Categorical(logits=posterior_data).sample()
+    print(f"batch_size: {batch_size}")
+    print(f"num_dims: {num_dims}")
+    print(f"samples shape: {samples.shape}")
     x_0, x_1 = torch.gather(
         coords, dim=-1, index=samples.view(1, batch_size).repeat(num_dims, 1))
+    print(f"stacked sample shape: {torch.stack([x_0, x_1], dim=0).shape}")
     return x_0, x_1
 
 

@@ -1,4 +1,5 @@
 import torch
+from tqdm import tqdm
 from lass_mnist.lass.diba_interaces import UnconditionedTransformerPrior
 from typing import List, Optional
 from .utils import normalize_logits
@@ -15,40 +16,36 @@ class DirectedGraphicalModel:
                  transformer: GPT2LMHeadModel,
                  num_sources:int):
         self.K = 256 #possible discrete values in the latent codes
-        past = torch.zeros((num_sources, self.K, 1)).long()
         self.num_sources = num_sources
+        self.transformer = transformer
 
-        #autoregressive priors
-        priors = []
-        for _ in range(num_sources):
-            priors.append(UnconditionedTransformerPrior(
-                transformer=transformer, sos=0))
-
-        # p_zs[i] = p(z_i)
-        self.p_zs = []
-        for i in range(num_sources):
-            log_prior, _ = priors[i].get_logits(
-                token_ids=past[i],
-                past_key_values=None,
-            )
-            log_prior = normalize_logits(log_prior).squeeze()
-            print(f"log_prior {i} has shape {log_prior.shape}")
-            self.p_zs.append(log_prior)
-        
         # p_mmzs[i] = p(m_i | m{i-1}, z_i)
         p_mmzs_path = "./lass_mnist/models/sums-MNIST-gm/best.pt"
         with open(p_mmzs_path, "rb") as f:
             self.p_mmzs = torch.log(torch.load(f) + 1e-16)
             print(f"p_mmzs has shape: {self.p_mmzs.shape}")
+    
+    def compute_priors(self, past) -> List[torch.Tensor]:
+        priors = []
+        for _ in range(self.num_sources):
+            priors.append(UnconditionedTransformerPrior(transformer=self.transformer, sos=0))
+
+        # p_zs[i] = p(z_i)
+        self.p_zs = []
+        for i in range(self.num_sources):
+            log_prior, _ = priors[i].get_logits(
+                token_ids=past[i],
+                past_key_values=None,
+            )
+            log_prior = normalize_logits(log_prior).squeeze()
+            self.p_zs.append(log_prior)
+
+        return priors
 
     def forward_pass(self, i: int, mixture: torch.Tensor):
         """
         It computes the message μα in the graphical model forward pass.
         """
-        #TODO: apart from updating the shapes, you should also re-consider the
-        # whole thing, since the forward pass is only defined at i > 0, while
-        # the backward pass is defined at all indices with i != num_sources.
-
         # shape is [256, 256, 256] = [K, K, K]
         curr_p_mmz = self.p_mmzs[i]
         # shape is [2, 256] = [num_sources, K]
@@ -81,20 +78,25 @@ class DirectedGraphicalModel:
     
     def compute_marginals(self, i: int) -> torch.Tensor:
         if i == 0:
-            return self.p_zs[i]*self.backward_results[i]
+            return self.p_zs[i] + self.backward_results[i]
         elif i == self.num_sources-1:
-            return self.p_zs[i]*self.forward_results[i-1]
+            return self.p_zs[i] + self.forward_results[i-1]
         else:
             return self.p_zs[i] + torch.logsumexp(self.forward_results[i-1] + self.backward_results[i], dim=0)
 
     def sample(self, marginals, mixture) -> torch.Tensor:
-        results = torch.full((2, len(mixture)),fill_value=-1, dtype=torch.long)
-        print(f"marginals shape is: {marginals.shape}")
+        results = torch.full((self.num_sources, len(mixture)),fill_value=-1, dtype=torch.long)
         results = torch.distributions.Categorical(logits=marginals[:, :, mixture].permute(0,2,1)).sample()
-        print(f"sample shape is: {results.shape}")
         return results.long()
     
-    def separate(self, mixture: torch.Tensor):
+    def single_sample(self, marginals: torch.Tensor, mixture: torch.Tensor, i: int) -> torch.Tensor:
+        # curr_marginals = marginals[:, :, mixture]
+        curr_marginals = marginals
+        results = torch.distributions.Categorical(logits=curr_marginals).sample()
+        print(f"result shape: {results.shape}")
+        return results.long()
+    
+    def single_separate(self, mixture: torch.Tensor, i: int) -> torch.Tensor:
         self.forward_results: List[Optional[torch.Tensor]] = []
         self.backward_results: List[Optional[torch.Tensor]] = [None for _ in range(self.num_sources-1)]
         self.marginal_results = []
@@ -114,8 +116,19 @@ class DirectedGraphicalModel:
             self.marginal_results.append(marginal)
 
         marginals = torch.stack(self.marginal_results)
-        result = self.sample(marginals, mixture)
+        result = self.single_sample(marginals, mixture, i)
         return result
+
+    def separate(self, mixture: torch.Tensor) -> torch.Tensor:
+        self.prior_past = torch.full((2, self.K, len(mixture)+1), fill_value=-1, dtype=torch.long)
+        self.prior_past[:,:, 0] = 0
+
+        for i in tqdm(range(len(mixture)), desc="Separating mixture..."):
+            self.compute_priors(past=self.prior_past[:, :, :i+1])
+            sample = self.single_separate(mixture, i)
+            self.prior_past[:, :, i+1] = sample
+            print(self.prior_past)
+        return self.prior_past[:,:,1:]
 
 
 
