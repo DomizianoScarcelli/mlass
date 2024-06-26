@@ -165,7 +165,7 @@ class EvaluateSeparationConfig:
     latent_length: int = MISSING
     vocab_size: int = MISSING
     # batch_size: int = 64
-    batch_size: int = 4
+    batch_size: int = 1
     class_conditioned: bool = False
     num_workers: int = mp.cpu_count() - 1
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -217,12 +217,12 @@ def main(cfg):
     with open(cfg.checkpoints.autoregressive, 'rb') as f:
         transformer.load_state_dict(torch.load(f, map_location=cfg.device))
 
-    graphical_model = DirectedGraphicalModel(transformer=transformer, 
-                                             num_sources=2)
     # set models to eval
     model.eval()
     transformer.eval()
 
+    graphical_model = DirectedGraphicalModel(transformer=transformer, 
+                                             num_sources=2)
     uncond_bos = 0
 
     print("Start separation")

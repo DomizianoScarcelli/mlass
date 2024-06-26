@@ -23,6 +23,8 @@ class DirectedGraphicalModel:
         p_mmzs_path = "./lass_mnist/models/sums-MNIST-gm/best.pt"
         with open(p_mmzs_path, "rb") as f:
             self.p_mmzs = torch.log(torch.load(f) + 1e-16)
+            # Normalization
+            self.p_mmzs -= torch.logsumexp(self.p_mmzs, dim=0)
             print(f"p_mmzs has shape: {self.p_mmzs.shape}")
     
     def compute_priors(self, past) -> List[torch.Tensor]:
@@ -42,28 +44,26 @@ class DirectedGraphicalModel:
 
         return priors
 
-    def forward_pass(self, i: int, mixture: torch.Tensor):
+    def forward_pass(self, i: int, token_idx: torch.Tensor):
         """
         It computes the message μα in the graphical model forward pass.
         """
         # shape is [256, 256, 256] = [K, K, K]
-        curr_p_mmz = self.p_mmzs[i]
+        curr_p_mmz = self.p_mmzs[i, token_idx]
         # shape is [2, 256] = [num_sources, K]
         curr_p_z = self.p_zs[i]
         if i == 0:
-            message = torch.logsumexp(curr_p_mmz + curr_p_z, dim=1)
-            # print(f"message shape is: {message.shape}")
+            message = torch.logsumexp(curr_p_mmz + curr_p_z, dim=0)
             return message
         new_message = torch.logsumexp(curr_p_mmz + curr_p_z, dim=1)
         old_message = torch.logsumexp(self.p_zs[i] + self.forward_results[i-1], dim=1)
         final_message = new_message + old_message
         return final_message
 
-    def backward_pass(self, i: int, mixture: torch.Tensor):
+    def backward_pass(self, i: int, token_idx: torch.Tensor):
         """
         It computes the message μβ in the graphical model backward pass.
         """
-        # print(f"backward: currently on i: {i}")
         if i == self.num_sources-1:
             #TODO: see better the axis where to perform logsumexp
             message = torch.logsumexp(self.p_zs[i+1], dim=0) + torch.logsumexp(self.p_mmzs[i], dim=0)
@@ -73,7 +73,7 @@ class DirectedGraphicalModel:
             # print(f"backward final_message shape: {final_message.shape}")
             return final_message
         
-        message = torch.logsumexp(self.p_zs[i+1], dim=0) + torch.logsumexp(self.p_mmzs[i], dim=-1)
+        message = torch.logsumexp(self.p_zs[i+1] + self.p_mmzs[i, token_idx], dim=-1)
         return message
     
     def compute_marginals(self, i: int) -> torch.Tensor:
@@ -84,16 +84,9 @@ class DirectedGraphicalModel:
         else:
             return self.p_zs[i] + torch.logsumexp(self.forward_results[i-1] + self.backward_results[i], dim=0)
 
-    def sample(self, marginals, mixture) -> torch.Tensor:
-        results = torch.full((self.num_sources, len(mixture)),fill_value=-1, dtype=torch.long)
-        results = torch.distributions.Categorical(logits=marginals[:, :, mixture].permute(0,2,1)).sample()
-        return results.long()
-    
     def single_sample(self, marginals: torch.Tensor, mixture: torch.Tensor, i: int) -> torch.Tensor:
-        # curr_marginals = marginals[:, :, mixture]
-        curr_marginals = marginals
-        results = torch.distributions.Categorical(logits=curr_marginals).sample()
-        print(f"result shape: {results.shape}")
+        #TODO: I don't know if I have to use the mixture in some ways here
+        results = torch.distributions.Categorical(logits=marginals).sample()
         return results.long()
     
     def single_separate(self, mixture: torch.Tensor, i: int) -> torch.Tensor:
@@ -101,13 +94,13 @@ class DirectedGraphicalModel:
         self.backward_results: List[Optional[torch.Tensor]] = [None for _ in range(self.num_sources-1)]
         self.marginal_results = []
         for i in range(self.num_sources-1):
-            forward = self.forward_pass(i, mixture)
+            forward = self.forward_pass(i, mixture[i])
             self.forward_results.append(forward)
         
         backward_range = list(reversed([i for i in range(self.num_sources-1)]))
         # print(f"Initializing backward pass on the sequence: {backward_range}")
         for i in backward_range: 
-            backward = self.backward_pass(i, mixture)
+            backward = self.backward_pass(i, mixture[i])
             self.backward_results[i] = backward
             # print([f"Full: {elem.shape}" if elem is not None else "Empty" for elem in self.backward_results])
         

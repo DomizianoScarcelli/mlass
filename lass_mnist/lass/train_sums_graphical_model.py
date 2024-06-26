@@ -53,9 +53,8 @@ def train(data_loader, sums, model, args, writer, step):
         
         codes = torch.stack([code.flatten() for code in codes], dim=0)
         codes_mixtures = torch.stack([code.flatten() for code in codes_mixtures], dim=0)
-
+        
         for i in range(NUM_SOURCES-1):
-            #TODO: I don't know which is right
             if i == 0:
                 sums[i, codes_mixtures[i], codes[i], codes[i+1]] += 1
                 sums[i, codes_mixtures[i], codes[i+1], codes[i]] += 1
@@ -91,8 +90,8 @@ def evaluate(data_loader, sums, model, args, writer, step):
                             
             for i in range(NUM_SOURCES-1):
                 if i == 0:
-                    loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes[i], codes[i+1]]))
-                    loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes[i+1], codes[i]]))
+                    loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes[i], codes[i+1]] + 1e-16))
+                    loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes[i+1], codes[i]]) + 1e-16)
                 else:
                     loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes_mixtures[i-1], codes[i+1]]))
                     loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes[i+1], codes_mixtures[i-1]]))
