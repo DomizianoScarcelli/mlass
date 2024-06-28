@@ -372,7 +372,7 @@ def _sample(posterior_data: torch.Tensor, coords: torch.LongTensor) -> Tuple[tor
 
     assert num_dims == 2
     assert nnz_coords == nnz_posterior
-
+    print(f"posterior_data: {posterior_data.shape}")
     samples = torch.distributions.Categorical(logits=posterior_data).sample()
     print(f"batch_size: {batch_size}")
     print(f"num_dims: {num_dims}")
