@@ -108,43 +108,39 @@ class DirectedGraphicalModel:
             raise NotImplementedError()
             return self.p_zs[i] + torch.logsumexp(self.forward_results[i-1] + self.backward_results[i], dim=0)
 
-    def single_sample(self, marginals: torch.Tensor, mixture: torch.Tensor, i: int) -> torch.Tensor:
-        # topk_indices = torch.topk(marginals, k=32, dim=-1).indices
-        # mask = torch.zeros_like(marginals, dtype=torch.bool)
-        # mask[:, topk_indices] = True
-        # marginals[~mask] = math.log(1e-12)
-        return torch.distributions.Categorical(logits=marginals).sample()
-    
+    def single_sample(self, marginals: torch.Tensor, topk: bool = True) -> torch.Tensor:
+        if topk:
+            topk_values, topk_indices = torch.topk(marginals, k=32, dim=1)
+            m = torch.full_like(marginals, fill_value=math.log(1e-12))
+            m[:, topk_indices] = marginals[:, topk_indices]
+            marginals = m
+        sample = torch.distributions.Categorical(logits=marginals).sample()
+        return sample
+
     def single_separate(self, mixture: torch.Tensor, i: int) -> torch.Tensor:
         self.forward_results: List[Optional[torch.Tensor]] = []
         self.backward_results: List[Optional[torch.Tensor]] = [None for _ in range(self.num_sources-1)]
         self.marginal_results = []
-        #TODO: if I do not comment until one shot marginals, the result is different. Super strange stuff
 
-        # for i in range(self.num_sources-1):
-        #     forward = self.forward_pass(i, mixture[i])
-        #     self.forward_results.append(forward)
+        for j in range(self.num_sources-1):
+            forward = self.forward_pass(j, mixture[i])
+            self.forward_results.append(forward)
         
-        # backward_range = list(reversed([i for i in range(self.num_sources-1)]))
+        backward_range = list(reversed([k for k in range(self.num_sources-1)]))
         # print(f"Initializing backward pass on the sequence: {backward_range}")
-        # for i in backward_range: 
-        #     backward = self.backward_pass(i, mixture[i])
-        #     self.backward_results[i] = backward
+        for j in backward_range: 
+            backward = self.backward_pass(j, mixture[i])
+            self.backward_results[j] = backward
             # print([f"Full: {elem.shape}" if elem is not None else "Empty" for elem in self.backward_results])
         
-        # for i in range(self.num_sources):
-        #     marginal = self.compute_marginals(i)
-        #     self.marginal_results.append(marginal)
+        for j in range(self.num_sources):
+            marginal = self.compute_marginals(j)
+            self.marginal_results.append(marginal)
 
-        # marginals = torch.stack(self.marginal_results)
-        marginals = self.one_shot(mixture[i])
+        marginals = torch.stack(self.marginal_results)
+        # marginals = self.one_shot(mixture[i])
 
-        # assert torch.allclose(marginals, o_marginals), f"""
-        # marginals: {marginals}
-        # o_marginals: {o_marginals}
-        # mse: {F.mse_loss(marginals, o_marginals)}
-        # """
-        result = self.single_sample(marginals, mixture, i)
+        result = self.single_sample(marginals, topk=False)
         return result
 
     def one_shot(self, token: torch.Tensor) -> torch.Tensor:

@@ -122,7 +122,6 @@ def generate_samples(
             likelihood=likelihood,
             mixture=codes_mixture[bi],
         )
-        print(r0,r1)
         # get separation closer to mixture
         (gen1im, gen2im), (gen1lat, gen2lat), _ = select_closest_to_mixture(
             vqvae=model,
@@ -176,8 +175,8 @@ class EvaluateSeparationConfig:
 
     latent_length: int = MISSING
     vocab_size: int = MISSING
-    # batch_size: int = 64
-    batch_size: int = 4
+    batch_size: int = 32
+    # batch_size: int = 4
     class_conditioned: bool = False
     num_workers: int = mp.cpu_count() - 1
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
