@@ -164,7 +164,7 @@ class EvaluateSeparationConfig:
 
     latent_length: int = MISSING
     vocab_size: int = MISSING
-    # batch_size: int = 64
+    # batch_size: int = 32
     batch_size: int = 1
     class_conditioned: bool = False
     num_workers: int = mp.cpu_count() - 1
