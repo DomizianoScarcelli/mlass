@@ -21,7 +21,6 @@ def get_index(num_sources: int, message_to: int):
             indexing.append(1)
     return indexing
 
-
 def exclude_row(tensor: torch.Tensor, row: int):
     """
     Exclude a row from a tensor

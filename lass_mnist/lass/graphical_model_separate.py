@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 import shutil
-from typing import Tuple, List, Any, Optional, Callable
+from typing import Tuple, List, Any, Optional, Callable, Literal
 
 import hydra
 import torch
@@ -14,6 +14,7 @@ import random
 from ..modules import VectorQuantizedVAE
 from .utils import refine_latents, CONFIG_DIR, ROOT_DIR, CONFIG_STORE
 from .diba_interaces import UnconditionedTransformerPrior, DenseLikelihood
+from diba.diba.graphical_model import DirectedGraphicalModel
 import multiprocessing as mp
 from typing import Sequence
 from numpy.random import default_rng
@@ -42,7 +43,7 @@ def seed_worker(worker_id):
     random.seed(worker_seed)
 
 
-def psnr_grayscale(target, preds, reduction="elementwise_mean", dim=None):
+def psnr_grayscale(target, preds, reduction: Optional[Literal["elementwise_mean", "sum", "none"]] ="elementwise_mean", dim=None):
     return torchmetrics.functional.peak_signal_noise_ratio(preds, target, data_range=1.0, reduction=reduction, dim=dim)
 
 
@@ -87,8 +88,7 @@ def select_closest_to_mixture(
 @torch.no_grad()
 def generate_samples(
     model: VectorQuantizedVAE,
-    transformer: GPT2LMHeadModel,
-    sums: torch.Tensor,
+    graphical_model: DirectedGraphicalModel,
     gts: Tuple[torch.Tensor, torch.Tensor],
     bos: Tuple[int, int],
     latent_length: int,
@@ -106,22 +106,11 @@ def generate_samples(
     codes_mixture = codes_mixture.view(
         batch_size, latent_length ** 2).tolist()  # (B, H**2)
 
-    # instantiate diba interface
-    label0, label1 = bos
-    p0 = UnconditionedTransformerPrior(transformer=transformer, sos=0)
-    p1 = UnconditionedTransformerPrior(transformer=transformer, sos=0)
-
-    likelihood = DenseLikelihood(sums=sums)
-
     gen1ims, gen2ims = [], []
     gen1lats, gen2lats = [], []
     for bi in tqdm.tqdm(range(batch_size), desc="separating"):
-        # print(f"I'm using the separation method: {separation_method}")
-        r0, r1 = separation_method(
-            priors=[p0, p1],
-            likelihood=likelihood,
-            mixture=codes_mixture[bi],
-        )
+        r0, r1 = graphical_model.separate(mixture=codes_mixture[bi])
+
         # get separation closer to mixture
         (gen1im, gen2im), (gen1lat, gen2lat), _ = select_closest_to_mixture(
             vqvae=model,
@@ -175,8 +164,8 @@ class EvaluateSeparationConfig:
 
     latent_length: int = MISSING
     vocab_size: int = MISSING
-    batch_size: int = 32
-    # batch_size: int = 4
+    # batch_size: int = 32
+    batch_size: int = 1
     class_conditioned: bool = False
     num_workers: int = mp.cpu_count() - 1
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -228,13 +217,12 @@ def main(cfg):
     with open(cfg.checkpoints.autoregressive, 'rb') as f:
         transformer.load_state_dict(torch.load(f, map_location=cfg.device))
 
-    with open(cfg.checkpoints.sums, 'rb') as f:
-        sums = torch.load(f, map_location=cfg.device)
-
     # set models to eval
     model.eval()
     transformer.eval()
 
+    graphical_model = DirectedGraphicalModel(transformer=transformer, 
+                                             num_sources=2)
     uncond_bos = 0
 
     print("Start separation")
@@ -254,12 +242,10 @@ def main(cfg):
 
         (gen1, gen2), (gen1lat, gen2lat) = generate_samples(
             model=model,
-            transformer=transformer,
-            sums=sums,
+            graphical_model=graphical_model,
             gts=[gt1, gt2],
             bos=[labels1, labels2],
             latent_length=cfg.latent_length,
-            separation_method=hydra.utils.instantiate(cfg.separation_method)
         )
 
         psnr = batched_psnr_unconditional(gts=[gt1, gt2], gens=[gen1, gen2])
@@ -273,7 +259,7 @@ def main(cfg):
             gen1lat,
             gen2lat,
             gtm,
-            n_iterations=1,#TODO: put it back to 500, now just to see the real performances
+            n_iterations=1, #TODO: used to remove refine latents, just for debug
             learning_rate=1e-1,
         )
 

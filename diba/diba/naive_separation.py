@@ -28,7 +28,8 @@ def _check_if_nan_or_inf(tensor: torch.Tensor) -> bool:
 
 def sample(mixture_t: int,
            priors: List[UnconditionedTransformerPrior],
-           sources: int, past_z: torch.Tensor,
+           sources: int,
+           past_z: torch.Tensor,
            likelihood: torch.Tensor):
     samples_t = []
     for i in range(sources):
@@ -114,7 +115,7 @@ def separate(mixture: torch.Tensor,
 
     log.debug(
         f"final all samples are {all_samples} with shape {all_samples.shape}")
-
+    
     all_samples = all_samples[..., 1:].to(torch.long)
     if sources == 2:
         return all_samples[0], all_samples[1]

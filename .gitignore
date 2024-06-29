@@ -146,4 +146,4 @@ dmypy.json
 
 logs
 
-*.pt
+*.pt*
