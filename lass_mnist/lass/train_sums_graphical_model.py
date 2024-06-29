@@ -11,7 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision.utils import make_grid
 from .utils import CONFIG_DIR, CONFIG_STORE, ROOT_DIR
 
-NUM_SOURCES = 2
+NUM_SOURCES = 3
 
 def roll(x, n):
     return torch.cat((x[:, -n:], x[:, :-n]), dim=1)
@@ -170,7 +170,7 @@ def main(cfg):
     for param in model.parameters():
         param.requires_grad = False
 
-    sums = torch.zeros(NUM_SOURCES, cfg.num_codes, cfg.num_codes, cfg.num_codes).to(cfg.device)
+    sums = torch.zeros(NUM_SOURCES-1, cfg.num_codes, cfg.num_codes, cfg.num_codes).to(cfg.device)
 
     step = 0
     best_loss = -1.0
