@@ -65,6 +65,8 @@ def audio_preprocess(x, hps):
     # For two channel, blend randomly into mono (standard is .5 left, .5 right)
 
     # x: NTC
+    if isinstance(x, tuple):
+        x = x[0]
     x = x.float()
     if x.shape[-1] == 2:
         if hps.aug_blend:
