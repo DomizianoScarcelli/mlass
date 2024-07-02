@@ -51,7 +51,7 @@ def seed_worker(worker_id):
     random.seed(worker_seed)
 
 
-def psnr_grayscale(target, preds, reduction: Literal["elementwise_mean", "sum", "none"] | None ="elementwise_mean", dim=None):
+def psnr_grayscale(target, preds, reduction: Optional[Literal["elementwise_mean", "sum", "none"]] = "elementwise_mean", dim=None):
     return torchmetrics.functional.peak_signal_noise_ratio(
         preds, target, data_range=1.0, reduction=reduction, dim=dim)
 
@@ -180,7 +180,7 @@ class EvaluateSeparationConfig:
 
     latent_length: int = MISSING
     vocab_size: int = MISSING
-    batch_size: int = 4
+    batch_size: int = 1
     # TODO: change it back to 64
     # batch_size: int = 16
     class_conditioned: bool = False
@@ -222,7 +222,7 @@ def main(cfg):
 
     # Define the data loaders
     test_loader = torch.utils.data.DataLoader(
-        PairsDataset(test_set, seed=200),
+        PairsDataset(test_set, seed=100),
         num_workers=cfg.num_workers,
         batch_size=cfg.batch_size,
         shuffle=False,
@@ -285,7 +285,7 @@ def main(cfg):
             gen1lat,
             gen2lat,
             gtm,
-            n_iterations=500,
+            n_iterations=1,
             learning_rate=1e-1,
         )
 
