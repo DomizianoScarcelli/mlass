@@ -22,7 +22,7 @@ class DirectedGraphicalModel:
         self.past_key = [None for _ in range(num_sources)]
 
         # p_mmzs[i] = p(m_i | m{i-1}, z_i)
-        p_mmzs_path = "./lass_mnist/models/sums-MNIST-gm/best.pt"
+        p_mmzs_path = "./lass_mnist/models/sums-MNIST-gm/best_82.pt"
         with open(p_mmzs_path, "rb") as f:
             sums = torch.load(f)
             # normalization = torch.sum(sums, dim=-1)
@@ -84,7 +84,8 @@ class DirectedGraphicalModel:
         """
         prior = torch.logsumexp(self.p_zs[i+1], dim=[0,1])
         if i == self.num_sources-2:
-            return prior + torch.logsumexp(self.p_mmzs[i, token_idx].unsqueeze(0), dim=0)
+            message =  torch.logsumexp(self.p_mmzs[i, token_idx].unsqueeze(0), dim=0)
+            return torch.logsumexp(prior + message, dim=-1)
         
         old_message = torch.logsumexp(self.p_mmzs[i, token_idx].unsqueeze(0) + self.backward_results[i+1], dim=0)
         final_message = torch.logsumexp(old_message + prior, dim=-1) 

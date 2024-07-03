@@ -7,13 +7,12 @@ import torch
 import torchmetrics
 import tqdm
 from omegaconf import MISSING
-from transformers import GPT2LMHeadModel, PreTrainedModel
+from transformers import PreTrainedModel
 from torchvision.utils import save_image
 import numpy as np
 import random
 from ..modules import VectorQuantizedVAE
 from .utils import refine_latents, CONFIG_DIR, ROOT_DIR, CONFIG_STORE
-from .diba_interaces import UnconditionedTransformerPrior, DenseLikelihood
 from diba.diba.graphical_model import DirectedGraphicalModel
 import multiprocessing as mp
 from typing import Sequence
@@ -164,7 +163,7 @@ class EvaluateSeparationConfig:
 
     latent_length: int = MISSING
     vocab_size: int = MISSING
-    batch_size: int = 32
+    batch_size: int = 1
     class_conditioned: bool = False
     num_workers: int = mp.cpu_count() - 1
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -258,7 +257,7 @@ def main(cfg):
             gen1lat,
             gen2lat,
             gtm,
-            n_iterations=500, #TODO: used to remove refine latents, just for debug
+            n_iterations=1, #TODO: used to remove refine latents, just for debug
             learning_rate=1e-1,
         )
 

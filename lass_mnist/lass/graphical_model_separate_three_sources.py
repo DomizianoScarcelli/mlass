@@ -209,8 +209,8 @@ class EvaluateSeparationConfig:
 
     latent_length: int = MISSING
     vocab_size: int = MISSING
-    batch_size: int = 32
-    # batch_size: int = 1
+    # batch_size: int = 32
+    batch_size: int = 1
     class_conditioned: bool = False
     num_workers: int = mp.cpu_count() - 1
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -264,12 +264,6 @@ def main(cfg):
     with open(cfg.checkpoints.autoregressive, 'rb') as f:
         transformer.load_state_dict(torch.load(f, map_location=cfg.device))
 
-    SUMS_CHECKPOINT_PATH = "lass_mnist/checkpoints/sum/best_3_sources.pt"
-    with open(SUMS_CHECKPOINT_PATH, 'rb') as f:
-        sums = torch.load(f, map_location=cfg.device)
-
-    likelihood = DenseMarginalLikelihood(sums=sums)
-
     # set models to eval
     model.eval()
     transformer.eval()
@@ -318,7 +312,7 @@ def main(cfg):
             gen2lat,
             gen3lat,
             gtm,
-            n_iterations=500, #TODO: debug
+            n_iterations=1, #TODO: debug
             learning_rate=1e-1,
         )
 
