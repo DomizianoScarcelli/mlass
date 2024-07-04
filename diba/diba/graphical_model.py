@@ -22,16 +22,13 @@ class DirectedGraphicalModel:
         self.past_key = [None for _ in range(num_sources)]
 
         # p_mmzs[i] = p(m_i | m{i-1}, z_i)
-        p_mmzs_path = "./lass_mnist/models/sums-MNIST-gm/best_82.pt"
+        p_mmzs_path = "./lass_mnist/models/sums-MNIST-gm/best_102.pt"
         with open(p_mmzs_path, "rb") as f:
             sums = torch.load(f)
             # normalization = torch.sum(sums, dim=-1)
             # mask = normalization != 0.0
             # sums[mask] = sums[mask] / normalization[mask].unsqueeze(-1)
             
-            #NOTE: the permute and unsqueeze is used just because I'm using the LASS pre-computed likelihood
-            # self.p_mmzs = torch.log(sums + 1e-12).permute(2,0,1).unsqueeze(0)
-
             self.p_mmzs = torch.log(sums + 1e-12)
             print(self.p_mmzs.shape)
             # Normalization
@@ -71,7 +68,7 @@ class DirectedGraphicalModel:
         """
         # shape is [256, 256, 256] = [K, K, K]
         # shape is [2, 256] = [num_sources, K]
-        prior = torch.logsumexp(self.p_zs[i], dim=[0,1])
+        prior = torch.logsumexp(self.p_zs[i], dim=[0])
         if i == 0:
             return torch.logsumexp(prior + self.p_mmzs[i, token_idx].unsqueeze(0), dim=1)
         old_message = torch.logsumexp(prior + self.forward_results[i-1], dim=-1)
@@ -82,13 +79,13 @@ class DirectedGraphicalModel:
         """
         It computes the message μβ in the graphical model backward pass.
         """
-        prior = torch.logsumexp(self.p_zs[i+1], dim=[0,1])
+        prior = torch.logsumexp(self.p_zs[i+1], dim=[0])
         if i == self.num_sources-2:
-            message =  torch.logsumexp(self.p_mmzs[i, token_idx].unsqueeze(0), dim=0)
+            message =  torch.logsumexp(prior + self.p_mmzs[i, token_idx].unsqueeze(0), dim=0)
             return torch.logsumexp(prior + message, dim=-1)
         
         old_message = torch.logsumexp(self.p_mmzs[i, token_idx].unsqueeze(0) + self.backward_results[i+1], dim=0)
-        final_message = torch.logsumexp(old_message + prior, dim=-1) 
+        final_message = torch.logsumexp(prior + old_message, dim=-1) 
         return final_message
 
  
@@ -104,9 +101,9 @@ class DirectedGraphicalModel:
 
     def single_sample(self, marginals: torch.Tensor, topk: Union[bool, int]= True) -> torch.Tensor:
         if topk:
-            topk_values, topk_indices = torch.topk(marginals, k=topk, dim=1)
+            topk_values, topk_indices = torch.topk(marginals, k=topk, dim=-1)
             m = torch.full_like(marginals, fill_value=math.log(1e-12))
-            m[:, topk_indices] = marginals[:, topk_indices]
+            m[:, :,topk_indices] = marginals[:, :,topk_indices]
             marginals = m
         sample = torch.distributions.Categorical(logits=marginals).sample()
         return sample
@@ -134,17 +131,17 @@ class DirectedGraphicalModel:
         marginals = torch.stack(self.marginal_results)
         # marginals = self.one_shot(mixture[i])
 
-        result = self.single_sample(marginals, topk=False)
+        result = self.single_sample(marginals, topk=64)
         return result
 
-    def one_shot(self, token: torch.Tensor) -> torch.Tensor:
-        # z0 = torch.logsumexp(self.p_zs[0], dim=-1)
-        # z1 = torch.logsumexp(self.p_zs[1], dim=-1)
-        z0 = self.p_zs[0]
-        z1 = self.p_zs[1]
-        marginal_0 = z0 + torch.logsumexp(z1 + self.p_mmzs[0, token], dim=-1)
-        marginal_1 = z1 + torch.logsumexp(z0 + self.p_mmzs[0, token], dim=0)
-        return torch.stack([marginal_0, marginal_1])
+    # def one_shot(self, token: torch.Tensor) -> torch.Tensor:
+    #     # z0 = torch.logsumexp(self.p_zs[0], dim=-1)
+    #     # z1 = torch.logsumexp(self.p_zs[1], dim=-1)
+    #     z0 = self.p_zs[0]
+    #     z1 = self.p_zs[1]
+    #     marginal_0 = z0 + torch.logsumexp(z1 + self.p_mmzs[0, token], dim=-1)
+    #     marginal_1 = z1 + torch.logsumexp(z0 + self.p_mmzs[0, token], dim=0)
+    #     return torch.stack([marginal_0, marginal_1])
 
     def separate(self, mixture: torch.Tensor) -> torch.Tensor:
         self.prior_past = torch.full((self.num_sources, self.K, len(mixture)+1), fill_value=-1, dtype=torch.long)
