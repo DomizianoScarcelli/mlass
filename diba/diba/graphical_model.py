@@ -1,11 +1,10 @@
 import torch
 from tqdm import tqdm
 import math
-from lass_mnist.lass.diba_interaces import UnconditionedTransformerPrior
+from diba.diba import SeparationPrior
 from typing import List, Optional, Union
 from .utils import normalize_logits
 import torch.nn.functional as F
-from transformers import GPT2LMHeadModel
 
 class DirectedGraphicalModel:
     """
@@ -14,40 +13,25 @@ class DirectedGraphicalModel:
     """
 
     def __init__(self, 
-                 transformer: GPT2LMHeadModel,
+                 priors: List[SeparationPrior],
+                 sums: torch.Tensor,
                  num_sources:int):
         self.K = 256 #possible discrete values in the latent codes
         self.num_sources = num_sources
-        self.transformer = transformer
+        self.priors = priors
         self.past_key = [None for _ in range(num_sources)]
 
-        # p_mmzs[i] = p(m_i | m{i-1}, z_i)
-        p_mmzs_path = "./lass_mnist/models/sums-MNIST-gm/best_335.pt"
-        with open(p_mmzs_path, "rb") as f:
-            sums = torch.load(f)
-            # sums = torch.sum(sums, dim=0).unsqueeze(0)
-            # normalization = torch.sum(sums, dim=-1)
-            # mask = normalization != 0.0
-            # sums[mask] = sums[mask] / normalization[mask].unsqueeze(-1)
-            
-            self.p_mmzs = torch.log(sums + 1e-12)
-            print(self.p_mmzs.shape)
-            # Normalization
-            self.p_mmzs -= torch.logsumexp(self.p_mmzs, dim=[2,3]).unsqueeze(2).unsqueeze(3)
-            # self.p_mmzs -= torch.logsumexp(self.p_mmzs, dim=1).unsqueeze(1)
-            self.pm = torch.logsumexp(self.p_mmzs, dim=[2,3])[-1].squeeze()
-
-            # print(f"p_mmzs: {self.p_mmzs}")
+        self.p_mmzs = torch.log(1e-12 + sums)
+        print(self.p_mmzs.shape)
+        self.p_mmzs -= torch.logsumexp(self.p_mmzs, dim=[2,3]).unsqueeze(2).unsqueeze(3)
+        # self.p_mmzs -= torch.logsumexp(self.p_mmzs, dim=1).unsqueeze(1)
+        self.pm = torch.logsumexp(self.p_mmzs, dim=[2,3])[-1].squeeze()
     
     def compute_priors(self, past) -> List[torch.Tensor]:
-        priors = []
-        for _ in range(self.num_sources):
-            priors.append(UnconditionedTransformerPrior(transformer=self.transformer, sos=0))
-
         # p_zs[i] = p(z_i)
         self.p_zs = []
         for i in range(self.num_sources):
-            log_prior, past_key = priors[i].get_logits(
+            log_prior, past_key = self.priors[i].get_logits(
                 token_ids=past[i],
                 past_key_values=self.past_key[i],
             )
@@ -60,7 +44,7 @@ class DirectedGraphicalModel:
             self.p_zs.append(log_prior)
                 
 
-        return priors
+        return self.priors
 
     def forward_pass(self, i: int, token_idx: torch.Tensor):
         """

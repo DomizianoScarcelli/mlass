@@ -63,11 +63,9 @@ class JukeboxPrior(SeparationPrior):
 
 class SparseLikelihood(Likelihood):
     def __init__(self, sum_dist_path: str, device: torch.device, lambda_coeff: float = 1.0):
-        print("DEBUG: inside SparseLikelihood init")
         self._device = torch.device(device)
         self._lambda_coeff = lambda_coeff
         self._freqs = self._normalize_matrix(sum_dist_path)
-        print("DEBUG: finished SparseLikelihood init")
 
     def get_device(self) -> torch.device:
         return self._device
@@ -86,17 +84,12 @@ class SparseLikelihood(Likelihood):
 
     def _normalize_matrix(self, sum_dist_path: str):
         sum_dist = sparse.load_npz(str(sum_dist_path))
-        print(f"sum dist: {sum_dist.dtype}")
         #TODO: accessing the matrix generates a bus error, I might need to generate the matrix from scratch
         integrals = sum_dist.sum(axis=-1, keepdims=True)
-        print("integrals")
         I, J, _ = integrals.coords
         integrals = sparse.COO(
             integrals.coords, integrals.data, shape=integrals.shape, fill_value=1
         )
-        print("sparse integrals")
         log_data = np.log(sum_dist / integrals) * self._lambda_coeff
-        print("log_data")
         result = sparse.GCXS.from_coo(log_data, compressed_axes=[2])
-        print("final_result")
         return result

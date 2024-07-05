@@ -12,6 +12,8 @@ from torchvision.utils import save_image
 import numpy as np
 import random
 from ..modules import VectorQuantizedVAE
+
+from lass_mnist.lass.diba_interaces import UnconditionedTransformerPrior
 from .utils import refine_latents, CONFIG_DIR, ROOT_DIR, CONFIG_STORE
 from diba.diba.graphical_model import DirectedGraphicalModel
 import multiprocessing as mp
@@ -163,7 +165,7 @@ class EvaluateSeparationConfig:
 
     latent_length: int = MISSING
     vocab_size: int = MISSING
-    batch_size: int = 64
+    batch_size: int = 1
     class_conditioned: bool = False
     num_workers: int = mp.cpu_count() - 1
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -218,9 +220,17 @@ def main(cfg):
     # set models to eval
     model.eval()
     transformer.eval()
+    
+    NUM_SOURCES = 2
+    priors = [UnconditionedTransformerPrior(transformer=transformer, sos=0) for _ in range(NUM_SOURCES)]
 
-    graphical_model = DirectedGraphicalModel(transformer=transformer, 
-                                             num_sources=2)
+    p_mmzs_path = "./lass_mnist/models/sums-MNIST-gm/best_335.pt"
+    with open(p_mmzs_path, "rb") as f:
+        sums = torch.load(f)
+
+    graphical_model = DirectedGraphicalModel(priors=priors,
+                                             sums=sums,
+                                             num_sources=NUM_SOURCES)
     uncond_bos = 0
 
     print("Start separation")

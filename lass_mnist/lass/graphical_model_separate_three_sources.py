@@ -268,7 +268,16 @@ def main(cfg):
     model.eval()
     transformer.eval()
 
-    graphical_model = DirectedGraphicalModel(transformer=transformer, num_sources=3)
+    NUM_SOURCES = 3
+    priors = [UnconditionedTransformerPrior(transformer=transformer, sos=0) for _ in range(NUM_SOURCES)]
+
+    p_mmzs_path = "./lass_mnist/models/sums-MNIST-gm/best_335.pt"
+    with open(p_mmzs_path, "rb") as f:
+        sums = torch.load(f)
+
+    graphical_model = DirectedGraphicalModel(priors=priors,
+                                             sums=sums,
+                                             num_sources=NUM_SOURCES)
 
     uncond_bos = 0
 
