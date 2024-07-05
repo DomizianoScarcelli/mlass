@@ -22,9 +22,10 @@ class DirectedGraphicalModel:
         self.past_key = [None for _ in range(num_sources)]
 
         # p_mmzs[i] = p(m_i | m{i-1}, z_i)
-        p_mmzs_path = "./lass_mnist/models/sums-MNIST-gm/best_102.pt"
+        p_mmzs_path = "./lass_mnist/models/sums-MNIST-gm/best_335.pt"
         with open(p_mmzs_path, "rb") as f:
             sums = torch.load(f)
+            # sums = torch.sum(sums, dim=0).unsqueeze(0)
             # normalization = torch.sum(sums, dim=-1)
             # mask = normalization != 0.0
             # sums[mask] = sums[mask] / normalization[mask].unsqueeze(-1)
@@ -35,7 +36,6 @@ class DirectedGraphicalModel:
             self.p_mmzs -= torch.logsumexp(self.p_mmzs, dim=[2,3]).unsqueeze(2).unsqueeze(3)
             # self.p_mmzs -= torch.logsumexp(self.p_mmzs, dim=1).unsqueeze(1)
             self.pm = torch.logsumexp(self.p_mmzs, dim=[2,3])[-1].squeeze()
-            # self.p_mmzs = normalize_logits(self.p_mmzs)
 
             # print(f"p_mmzs: {self.p_mmzs}")
     
@@ -51,7 +51,7 @@ class DirectedGraphicalModel:
                 token_ids=past[i],
                 past_key_values=self.past_key[i],
             )
-            log_prior = normalize_logits(log_prior)
+            log_prior = normalize_logits(log_prior) - self.pm
 
 
             # NOTE: this is pretty much useless for the UnconditionedTransformerPrior since the past key is always none
@@ -131,7 +131,7 @@ class DirectedGraphicalModel:
         marginals = torch.stack(self.marginal_results)
         # marginals = self.one_shot(mixture[i])
 
-        result = self.single_sample(marginals, topk=64)
+        result = self.single_sample(marginals, topk=False)
         return result
 
     # def one_shot(self, token: torch.Tensor) -> torch.Tensor:

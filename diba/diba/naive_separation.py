@@ -1,15 +1,13 @@
-from typing import Dict, List, NamedTuple, Set, Tuple, Union
+from typing import List
 import numpy as np
 import torch
 from tqdm import tqdm
 from diba.diba.utils import normalize_logits
 
-from lass_mnist.lass.diba_interaces import DenseMarginalLikelihood, UnconditionedTransformerPrior
-from transformers import GPT2LMHeadModel, GPT2Config
+from lass_mnist.lass.diba_interaces import GPT2LMHeadModel, UnconditionedTransformerPrior
 
 import logging
 
-from lass_mnist.lass.utils import ROOT_DIR
 
 
 log = logging.getLogger("logger")
