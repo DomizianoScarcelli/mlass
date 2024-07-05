@@ -43,6 +43,8 @@ def load_checkpoint(checkpoint_path: Union[Path, str]) -> Tuple[sparse.COO, int]
     assert isinstance(sum_dist, sparse.COO)
     return sum_dist, iterations
 
+def collate_fn(batch):
+    return torch.stack([torch.from_numpy(b) for b in batch], 0),
 
 def estimate_distribution(
     hps: Hyperparams,
@@ -80,6 +82,7 @@ def estimate_distribution(
     # instantiate the vqvae model and audio dataset
     vqvae = make_vqvae(hps, device)
     audio_dataset = FilesAudioDataset(hps)
+    
 
     # prepare data-loader
     dataset_loader = DataLoader(
@@ -89,8 +92,7 @@ def estimate_distribution(
         pin_memory=False,
         shuffle=True,
         drop_last=True,
-        collate_fn=lambda batch: torch.stack(
-            [torch.from_numpy(b) for b in batch], 0),
+        collate_fn=collate_fn
     )
 
     # VQ-VAE arithmetic statistics generation
@@ -110,7 +112,7 @@ def estimate_distribution(
     # run estimation loop
     with torch.no_grad():
         for epoch in range(epochs):
-            for batch_idx, batch in enumerate(tqdm(dataset_loader)):
+            for batch_idx, batch in enumerate(tqdm(dataset_loader, desc=f"Epoch: {epoch}/{epochs} | Separating audio...")):
                 x = audio_preprocess(batch, hps=hps)
 
                 # get tracks from batch
@@ -230,12 +232,13 @@ if __name__ == "__main__":
     sl = args.pop("sample_length")
     hps = setup_hparams(
         "vqvae",
+        #TODO: commented for now since those keys do not exist in the args dict
         dict(
             # vqvae hps
-            l_bins=args["latent_bins"],
-            downs_t=args.pop("downs_t"),
-            sr=sr,
-            commit=args.pop("commit"),
+            # l_bins=args["latent_bins"],
+            # downs_t=args.pop("downs_t"),
+            # sr=sr,
+            # commit=args.pop("commit"),
             restore_vqvae=vqvae_path,
             # data hps
             sample_length=int(sl * sr),

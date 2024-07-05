@@ -1,3 +1,4 @@
+import os
 import multiprocessing as mp
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -11,7 +12,8 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision.utils import make_grid
 from .utils import CONFIG_DIR, CONFIG_STORE, ROOT_DIR
 
-NUM_SOURCES = 2
+NUM_SOURCES = 3
+RESTORE_FROM = 224
 
 def roll(x, n):
     return torch.cat((x[:, -n:], x[:, :-n]), dim=1)
@@ -93,8 +95,8 @@ def evaluate(data_loader, sums, model, args, writer, step):
                     loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes[i], codes[i+1]] + 1e-16))
                     loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes[i+1], codes[i]]) + 1e-16)
                 else:
-                    loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes_mixtures[i-1], codes[i+1]]))
-                    loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes[i+1], codes_mixtures[i-1]]))
+                    loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes_mixtures[i-1], codes[i+1]] + 1e-16))
+                    loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes[i+1], codes_mixtures[i-1]] + 1e-16))
 
         loss /= len(data_loader)         
         writer.add_scalar("loss/test/loss", loss.item(), step)
@@ -169,16 +171,27 @@ def main(cfg):
     # freeze vqvae parameters
     for param in model.parameters():
         param.requires_grad = False
-
-    sums = torch.zeros(NUM_SOURCES, cfg.num_codes, cfg.num_codes, cfg.num_codes).to(cfg.device)
+    
+    if RESTORE_FROM is None:
+        print(f"Creating empyy sums")
+        sums = torch.zeros(NUM_SOURCES-1, cfg.num_codes, cfg.num_codes, cfg.num_codes).to(cfg.device)
+    else:
+        print(f"Loaded sums from epoch {RESTORE_FROM}")
+        sums_path = f"./lass_mnist/models/sums-MNIST-gm/best_{RESTORE_FROM}.pt"
+        if not os.path.exists(sums_path):
+            raise ValueError(f"Path for restoring sums does not exist: {sums_path}")
+        with open(sums_path, "rb") as f:
+            sums = torch.load(f, map_location=cfg.device)
+            if sums.shape[0]+1 != NUM_SOURCES:
+                raise ValueError(f"The restored sums was generated for a different number of sources: {sums.shape[0] + 1}, which is different from the current {NUM_SOURCES} sources")
 
     step = 0
     best_loss = -1.0
-    for epoch in tqdm(range(cfg.num_epochs)):
+    for epoch in tqdm(range(cfg.num_epochs - RESTORE_FROM if RESTORE_FROM is not None else 0)):
         step = train(train_loader, sums, model, cfg, writer, step)
         loss = evaluate(test_loader, sums, model, cfg, writer, step)
 
-        print("loss = {:f} at epoch {:f}".format(loss, epoch + 1))
+        print("loss = {:f} at epoch {:f}".format(loss, epoch + 1 + RESTORE_FROM if RESTORE_FROM is not None else 0))
         writer.add_scalar("loss/testing_loss", loss, epoch + 1)
 
         if (epoch == 0) or (loss < best_loss):

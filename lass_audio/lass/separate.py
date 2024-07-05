@@ -28,7 +28,7 @@ class Separator(torch.nn.Module, abc.ABC):
         super().__init__()
 
     @abc.abstractmethod
-    def separate(mixture) -> Mapping[str, torch.Tensor]:
+    def separate(self, mixture) -> Mapping[str, torch.Tensor]:
         ...
 
 
@@ -41,6 +41,7 @@ class BeamsearchSeparator(Separator):
         likelihood: Likelihood,
         num_beams: int,
     ):
+        print("inside BeamsearchSeparator init method")
         super().__init__()
         self.likelihood = likelihood
         self.source_types = list(priors)
@@ -51,6 +52,7 @@ class BeamsearchSeparator(Separator):
         self.encode_fn = encode_fn
         # lambda x: decode_latent_codes(vqvae, x.squeeze(0), level=vqvae_level)
         self.decode_fn = decode_fn
+        print
 
     @torch.no_grad()
     def separate(self, mixture: torch.Tensor) -> Mapping[str, torch.Tensor]:
@@ -230,7 +232,7 @@ def main(
         sample_tokens=max_sample_tokens,
         device=device,
     )
-
+    print("VQVAE setup completed")
     priors = setup_priors(
         prior_paths=[prior_1_path, prior_2_path],
         prior_types=[prior_1_type, prior_2_type],
@@ -242,9 +244,11 @@ def main(
         Path(prior_1_path).stem: priors[0],
         Path(prior_2_path).stem: priors[1],
     }
+    print("Priors setup completed")
 
     # create separator
     level = vqvae.levels - 1
+    print("Creating separator")
     separator = BeamsearchSeparator(
         encode_fn=lambda x: vqvae.encode(
             x.unsqueeze(-1).to(device), level, level + 1)[-1].squeeze(0).tolist(),  # TODO: check if correct
@@ -252,10 +256,12 @@ def main(
             vqvae, x.squeeze(0), level=level),
         priors={k: JukeboxPrior(p.prior, torch.zeros(
             (), dtype=torch.float32, device=device)) for k, p in priors.items()},
+        #TODO: the SparseLikelihood._normalize_matrix method causes a bus error
         likelihood=SparseLikelihood(sum_frequencies_path, device, 3.0),
         num_beams=10,
         **kwargs,
     )
+    print(f"Separator setup completed")
 
     # setup dataset
     raw_to_tokens = get_raw_to_tokens(vqvae.strides_t, vqvae.downs_t)

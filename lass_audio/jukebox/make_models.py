@@ -199,18 +199,22 @@ def make_prior(hps, vqvae, device='cuda'):
         print_all(f"Loading prior in eval mode")
         prior.eval()
         freeze_model(prior)
+        print_all(f"Finished loading prior in eval mode")
     return prior
 
 
 def make_model(model, device, hps, levels=None):
+    print("Creating models...")
     vqvae, *priors = MODELS[model]
     vqvae = make_vqvae(setup_hparams(vqvae, dict(sample_length=hps.get(
         'sample_length', 0), sample_length_in_seconds=hps.get('sample_length_in_seconds', 0))), device)
     hps.sample_length = vqvae.sample_length
     if levels is None:
         levels = range(len(priors))
+    print_all(f"Loading {len(levels)} priors")
     priors = [make_prior(setup_hparams(priors[level], dict()),
                          vqvae, 'cpu') for level in levels]
+    print_all("All priors correctly loaded")
     return vqvae, priors
 
 
@@ -234,7 +238,8 @@ def save_outputs(model, device, hps):
     genre_ids = [1]
     total_length = 2 * 2646000
     offset = 2646000
-
+    
+    print(f"making models")
     vqvae, priors = make_model(model, device, hps)
 
     # encode
@@ -267,8 +272,10 @@ def save_outputs(model, device, hps):
 
 
 def run(model, port=29500, **kwargs):
-    from lass_audio.jukebox.utils.dist_utils import setup_dist_from_mpi
-    rank, local_rank, device = setup_dist_from_mpi(port=port)
+    # from lass_audio.jukebox.utils.dist_utils import setup_dist_from_mpi
+    # rank, local_rank, device = setup_dist_from_mpi(port=port)
+
+    device = t.device("cpu")
     hps = Hyperparams(**kwargs)
 
     with t.no_grad():
