@@ -1,7 +1,7 @@
 import abc
 import functools
 from pathlib import Path
-from typing import Callable, List, Mapping
+from typing import Callable, List, Mapping, Optional
 
 from diba.diba import fast_beamsearch_separation, fast_sampled_separation
 import sparse
@@ -12,7 +12,7 @@ import tqdm
 from diba.diba import Likelihood
 from torch.utils.data import DataLoader
 from diba.diba.interfaces import SeparationPrior
-from diba.diba.graphical_model import DirectedGraphicalModel
+from diba.diba.sparse_graphical_model import SparseDirectedGraphicalModel
 
 from lass_audio.lass.datasets import SeparationDataset
 from lass_audio.lass.datasets import SeparationSubset
@@ -53,7 +53,6 @@ class BeamsearchSeparator(Separator):
         self.encode_fn = encode_fn
         # lambda x: decode_latent_codes(vqvae, x.squeeze(0), level=vqvae_level)
         self.decode_fn = decode_fn
-        print
 
     @torch.no_grad()
     def separate(self, mixture: torch.Tensor) -> Mapping[str, torch.Tensor]:
@@ -72,6 +71,41 @@ class BeamsearchSeparator(Separator):
 
         # decode results
         return {source: self.decode_fn(xi) for source, xi in zip(self.source_types, x)}
+
+class SparseDirectedGraphicalSeparator(Separator):
+    def __init__(
+            self,
+            encode_fn: Callable,
+            decode_fn: Callable,
+            priors: Mapping[str, SeparationPrior],
+            sums: torch.Tensor,
+            topk: Optional[int] = None
+            ):
+        super().__init__()
+        self.source_types = list(priors)
+        self.priors = list(priors.values())
+        self.gm = SparseDirectedGraphicalModel(
+                priors = list(priors.values()),
+                sums=sums,
+                num_tokens=sums.shape[0],
+                num_sources=2)
+
+        # lambda x: vqvae.encode(x.unsqueeze(-1), vqvae_level, vqvae_level + 1).view(-1).tolist()
+        self.encode_fn = encode_fn
+        # lambda x: decode_latent_codes(vqvae, x.squeeze(0), level=vqvae_level)
+        self.decode_fn = decode_fn
+
+    @torch.no_grad()
+    def separate(self, mixture: torch.Tensor) -> Mapping[str, torch.Tensor]:
+        # convert signal to codes
+        mixture_codes = self.encode_fn(mixture)
+
+        # separate mixture (x has shape [2, num. tokens])
+        x = self.gm.separate(mixture=mixture_codes)
+
+        # decode results
+        return {source: self.decode_fn(xi) for source, xi in zip(self.source_types, x)}
+
 
 
 class TopkSeparator(Separator):
@@ -131,7 +165,7 @@ class TopkSeparator(Separator):
 @torch.no_grad()
 def separate_dataset(
     dataset: SeparationDataset,
-    separate_fn: Callable,
+    separator: Separator,
     save_path: Path,
     save_fn: Callable,
     resume: bool = False,
@@ -161,7 +195,7 @@ def separate_dataset(
         # generate mixture
         mixture = 0.5 * ori_1 + 0.5 * ori_2
         mixture = mixture.squeeze(0)  # shape: [1 , sample-length]
-        seps = separate_fn(mixture=mixture)
+        seps = separator.separate(mixture=mixture)
         chunk_path.mkdir(parents=True)
 
         # save separated audio
@@ -268,17 +302,26 @@ def main(
             sums_coo.data, device=device, dtype=torch.float)
         sums = torch.sparse_coo_tensor(coords, data, size=sums_coo.shape)
         print("Sums: ", sums)
-    
 
-    graphical_model = DirectedGraphicalModel(
-            priors = priors,
-            sums=sums,
-            num_sources=2)
+    # create separator
+    level = vqvae.levels - 1
+    print("Creating separator")
+    separator = SparseDirectedGraphicalSeparator(
+        encode_fn=lambda x: vqvae.encode(
+            x.unsqueeze(-1).to(device), level, level + 1)[-1].squeeze(0).tolist(), 
+        decode_fn=lambda x: decode_latent_codes(
+            vqvae, x.squeeze(0), level=level),
+        priors={k: JukeboxPrior(p.prior, torch.zeros(
+            (), dtype=torch.float32, device=device)) for k, p in priors.items()},
+        sums=sums,
+        **kwargs,
+    )
+    print(f"Separator setup completed")
 
     # separate subsample
     separate_dataset(
         dataset=subdataset,
-        separate_fn=graphical_model.separate,
+        separator=separator,
         save_path=save_path,
         save_fn=functools.partial(save_separation, sample_rate=sample_rate),
         resume=resume,

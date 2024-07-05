@@ -1,12 +1,13 @@
 import torch
+import sparse
 from tqdm import tqdm
 import math
 from diba.diba import SeparationPrior
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Any
 from .utils import normalize_logits
 import torch.nn.functional as F
 
-class DirectedGraphicalModel:
+class SparseDirectedGraphicalModel:
     """
     Represents the Bayesian Network with the latent codes z_1,...,z_n and the
     mixtures m_1,...,m_n at all the stages i.
@@ -15,25 +16,32 @@ class DirectedGraphicalModel:
     def __init__(self, 
                  priors: List[SeparationPrior],
                  sums: torch.Tensor,
-                 num_sources:int):
-        self.K = 256 #possible discrete values in the latent codes
+                 num_tokens: int,
+                 num_sources: int):
+        self.K = num_tokens #possible discrete values in the latent codes
         self.num_sources = num_sources
         self.priors = priors
         self.past_key = [None for _ in range(num_sources)]
+        
+        # Take the log
+        self.p_mmzs = sums.unsqueeze(0)
+        print(self.p_mmzs[0,0])
+        
+        #TODO: insert normalization back, now it's just for debug
 
-        self.p_mmzs = torch.log(1e-12 + sums)
-        print(self.p_mmzs.shape)
-        self.p_mmzs -= torch.logsumexp(self.p_mmzs, dim=[2,3]).unsqueeze(2).unsqueeze(3)
-        # self.p_mmzs -= torch.logsumexp(self.p_mmzs, dim=1).unsqueeze(1)
-        self.pm = torch.logsumexp(self.p_mmzs, dim=[2,3])[-1].squeeze()
+        # normalizer = torch.sum(self.p_mmzs, dim=[2,3]).unsqueeze(2).unsqueeze(3)
+        # self.p_mmzs /= normalizer.expand_as(self.p_mmzs)
+
+        # self.pm = torch.sparse.sum(self.p_mmzs, dim=[2,3])[-1].squeeze()
+        self.pm = 0 #TODO: just for debug
     
     def compute_priors(self, past) -> List[torch.Tensor]:
         # p_zs[i] = p(z_i)
         self.p_zs = []
         for i in range(self.num_sources):
             log_prior, past_key = self.priors[i]._get_logits(
-                past[i], self.past_key[i],
-            )
+                    past[i],
+                    self.past_key[i])
             log_prior = normalize_logits(log_prior) - self.pm
 
 
@@ -53,9 +61,10 @@ class DirectedGraphicalModel:
         # shape is [2, 256] = [num_sources, K]
         prior = torch.logsumexp(self.p_zs[i], dim=[0])
         if i == 0:
-            return torch.logsumexp(prior + self.p_mmzs[i, token_idx].unsqueeze(0), dim=1)
+            print(f"DEBUG: indexing p_mmzs with i:{i}, token_idx: {token_idx}")
+            return torch.logsumexp(prior + self.p_mmzs[i, token_idx].unsqueeze(0).to_dense(), dim=1)
         old_message = torch.logsumexp(prior + self.forward_results[i-1], dim=-1)
-        final_message = torch.logsumexp(old_message + self.p_mmzs[i, token_idx].unsqueeze(0), dim=1)
+        final_message = torch.logsumexp(old_message + self.p_mmzs[i, token_idx].unsqueeze(0).to_dense(), dim=1)
         return final_message
 
     def backward_pass(self, i: int, token_idx: torch.Tensor):
@@ -64,10 +73,10 @@ class DirectedGraphicalModel:
         """
         prior = torch.logsumexp(self.p_zs[i+1], dim=[0])
         if i == self.num_sources-2:
-            message =  torch.logsumexp(prior + self.p_mmzs[i, token_idx].unsqueeze(0), dim=0)
+            message =  torch.logsumexp(prior + self.p_mmzs[i, token_idx].unsqueeze(0).to_dense(), dim=0)
             return torch.logsumexp(prior + message, dim=-1)
         
-        old_message = torch.logsumexp(self.p_mmzs[i, token_idx].unsqueeze(0) + self.backward_results[i+1], dim=0)
+        old_message = torch.logsumexp(self.p_mmzs[i, token_idx].unsqueeze(0).to_dense() + self.backward_results[i+1], dim=0)
         final_message = torch.logsumexp(prior + old_message, dim=-1) 
         return final_message
 

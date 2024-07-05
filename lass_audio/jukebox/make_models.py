@@ -199,7 +199,6 @@ def make_prior(hps, vqvae, device='cuda'):
         print_all(f"Loading prior in eval mode")
         prior.eval()
         freeze_model(prior)
-        print_all(f"Finished loading prior in eval mode")
     return prior
 
 
