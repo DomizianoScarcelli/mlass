@@ -52,7 +52,6 @@ class BeamsearchSeparator(Separator):
         self.encode_fn = encode_fn
         # lambda x: decode_latent_codes(vqvae, x.squeeze(0), level=vqvae_level)
         self.decode_fn = decode_fn
-        print
 
     @torch.no_grad()
     def separate(self, mixture: torch.Tensor) -> Mapping[str, torch.Tensor]:

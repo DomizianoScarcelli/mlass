@@ -29,20 +29,18 @@ class DirectedGraphicalModel:
     
     def compute_priors(self, past) -> List[torch.Tensor]:
         # p_zs[i] = p(z_i)
-        self.p_zs = []
+        self.p_zs = torch.empty((self.num_sources, self.K, self.K))
         for i in range(self.num_sources):
             log_prior, past_key = self.priors[i]._get_logits(
-                past[i], self.past_key[i],
-            )
+                    past[i],
+                    self.past_key[i])
             log_prior = normalize_logits(log_prior) - self.pm
-
 
             # NOTE: this is pretty much useless for the UnconditionedTransformerPrior since the past key is always none
             self.past_key[i] = past_key
 
-            self.p_zs.append(log_prior)
+            self.p_zs[i] = log_prior
                 
-
         return self.priors
 
     def forward_pass(self, i: int, token_idx: torch.Tensor):
@@ -97,13 +95,15 @@ class DirectedGraphicalModel:
         self.marginal_results = []
 
         for j in range(self.num_sources-1):
-            forward = self.forward_pass(j, mixture[i])
+            forward = self.forward_pass(j, mixture[i]).squeeze()
+            # print("Forward: ", forward.shape)
             self.forward_results.append(forward)
         
         backward_range = list(reversed([k for k in range(self.num_sources-1)]))
         # print(f"Initializing backward pass on the sequence: {backward_range}")
         for j in backward_range: 
             backward = self.backward_pass(j, mixture[i])
+            # print("Backward: ", backward.shape)
             self.backward_results[j] = backward
             # print([f"Full: {elem.shape}" if elem is not None else "Empty" for elem in self.backward_results])
         
