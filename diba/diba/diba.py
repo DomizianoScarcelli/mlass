@@ -291,7 +291,7 @@ def _ancestral_sample(
         else:
             raise RuntimeError(
                 f"Code {mixture[sample_t]} is not available in likelihood!")
-
+        
         num_current_beams = len(beams)
 
         # make history consistent with current beams

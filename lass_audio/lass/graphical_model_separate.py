@@ -102,9 +102,10 @@ class SparseDirectedGraphicalSeparator(Separator):
 
         # separate mixture (x has shape [2, num. tokens])
         x = self.gm.separate(mixture=mixture_codes)
+        print(f"x shape: {x.shape}")
 
         # decode results
-        return {source: self.decode_fn(xi) for source, xi in zip(self.source_types, x)}
+        return {source: self.decode_fn(xi.view(-1)) for source, xi in zip(self.source_types, x)}
 
 
 
@@ -222,6 +223,10 @@ def save_separation(
     assert len(original_signals) == len(separated_signals)
     for i, (ori, sep) in enumerate(zip(original_signals, separated_signals)):
         print(ori.shape, sep.shape)
+        sdr = compute_sdr(ori, sep)
+        print(f"SDR is: ", sdr)
+        sdr = compute_sdr(sep, ori)
+        print(f"SDR is: ", sdr)
         torchaudio.save(str(path / f"ori{i+1}.wav"),
                         ori.cpu(), sample_rate=sample_rate)
         torchaudio.save(str(path / f"sep{i+1}.wav"),
@@ -327,6 +332,13 @@ def main(
         resume=resume,
     )
 
+
+def compute_sdr(s_ref: torch.Tensor, s_est: torch.Tensor):
+    power_ref = torch.sum(s_ref ** 2)
+    power_error = torch.sum((s_ref - s_est) ** 2)
+    sdr = 10 * torch.log10(power_ref / power_error)
+    
+    return sdr
 
 if __name__ == "__main__":
     main()
