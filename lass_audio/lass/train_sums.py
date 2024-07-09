@@ -128,13 +128,19 @@ def estimate_distribution(
                 # save output
                 iterations += 1
                 if iterations % save_iters == 0:
-                    sum_dist = sparse.COO(
-                        coords=[
+                    coords = [
                             prefix_i + buffer_add_1 + buffer_add_2,
                             prefix_j + buffer_add_2 + buffer_add_1,
                             prefix_k + buffer_sum + buffer_sum,
-                        ],
-                        data=prefix_data + [1] * (len(buffer_add_1) * 2),
+                    ]
+                    data = prefix_data + [1] * (len(buffer_add_1) * 2)
+                    print(f"Coords len: ", len(coords))
+                    print(f"Coords elements len: ", [len(elem) for elem in coords])
+                    print(f"Data len: ", len(data))
+                    raise ValueError()
+                    sum_dist = sparse.COO(
+                        coords=coords,
+                        data=data,
                         shape=[latent_bins, latent_bins, latent_bins],
                     )
 

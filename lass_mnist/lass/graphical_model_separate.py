@@ -224,7 +224,7 @@ def main(cfg):
     NUM_SOURCES = 2
     priors = [UnconditionedTransformerPrior(transformer=transformer, sos=0) for _ in range(NUM_SOURCES)]
 
-    p_mmzs_path = "./lass_mnist/models/sums-MNIST-gm/best_335.pt"
+    p_mmzs_path = "./lass_mnist/models/sums-MNIST-gm/best.pt"
     with open(p_mmzs_path, "rb") as f:
         sums = torch.load(f)
 

@@ -134,9 +134,9 @@ def estimate_distribution(
 
                 # get tracks from batch
                 xs = split_datapoints_by_step(x, batch_size, step=NUM_SOURCES)
-                print("xs shape: ", xs.shape)
+                assert xs.shape[0] == NUM_SOURCES
                 mixtures = get_mixtures(datapoints=xs)
-                print("mixtures shape: ", mixtures.shape)
+                assert mixtures.shape[0] == NUM_SOURCES-1 
 
                 #TODO: continue
 
@@ -152,45 +152,55 @@ def estimate_distribution(
                 if iterations % save_iters == 0: 
                     if NUM_SOURCES not in [2,3]:
                         raise NotImplementedError("Train sums implemeneted just for 2 and 3 sources")
+
+                    coords = []
+                    data = []
                     for i in range(NUM_SOURCES-1):
                         if i == 0:
-                            sum_dist = sparse.COO(
-                                coords=[
-                                    i,
+                            coords = [
+                                    [i] * len(buffer_adds[0]) * 2,
                                     prefix_i + buffer_adds[i] + buffer_adds[i+1],
                                     prefix_j + buffer_adds[i+1] + buffer_adds[i],
-                                    prefix_k + buffer_sums[i] + buffer_sums[i],
-                                ],
-                                data=prefix_data + [1] * (len(buffer_adds[i]) * 2),
-                                shape=[NUM_SOURCES-1, latent_bins, latent_bins, latent_bins],
-                            )
+                                    prefix_k + buffer_sums[i] + buffer_sums[i]
+                            ]
+                            data = prefix_data + [1] * (len(buffer_adds[1]) * 2)
+                            print(f"i: {i} | Coords len: ", len(coords))
+                            print(f"i: {i} | Coords elements len: ", [len(elem) for elem in coords])
+                            print(f"i: {i} | Data len: ", len(data))
                         else:
-                            sum_dist = sparse.COO(
-                                coords=[
-                                    i,
-                                    prefix_i + buffer_sums[i-1] + buffer_adds[i+1],
-                                    prefix_j + buffer_adds[i+1] + buffer_sums[i-1],
-                                    prefix_k + buffer_sums[i] + buffer_sums[i],
-                                ],
-                                data=prefix_data + [1] * (len(buffer_adds[i]) * 2),
-                                shape=[NUM_SOURCES-1, latent_bins, latent_bins, latent_bins],
-                            )
+                            coords=[
+                                coords[0] + [i] * len(buffer_adds[0]) * 2,
+                                coords[1] + prefix_i + buffer_sums[i-1] + buffer_adds[i+1],
+                                coords[2] + prefix_j + buffer_adds[i+1] + buffer_sums[i-1],
+                                coords[3] + prefix_k + buffer_sums[i] + buffer_sums[i],
+                            ]
+                            data += prefix_data + [1] * (len(buffer_adds[1]) * 2)
+                            print(f"i: {i} | Coords len: ", len(coords))
+                            print(f"i: {i} | Coords elements len: ", [len(elem) for elem in coords])
+                            print(f"i: {i} | Data len: ", len(data))
 
-                        # store results
-                        output_dir = Path(output_dir)
-                        output_dir.mkdir(parents=True, exist_ok=True)
-                        checkpoint_path = output_dir / f"sum_dist_{iterations}.npz"
-                        sparse.save_npz(str(checkpoint_path), sum_dist)
+                    sum_dist = sparse.COO(
+                        coords=coords,
+                        data=data,
+                        shape=[NUM_SOURCES-1, latent_bins, latent_bins, latent_bins],
+                    )
+                    # store results
+                    output_dir = Path(output_dir)
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    checkpoint_path = output_dir / f"sum_dist_{iterations}.npz"
+                    sparse.save_npz(str(checkpoint_path), sum_dist)
 
-                        # load compressed matrix
-                        sum_dist, iterations = load_checkpoint(checkpoint_path)
-                        _, prefix_i, prefix_j, prefix_k = sum_dist.coords.tolist()
-                        prefix_data = sum_dist.data.tolist()
-                        del sum_dist
+                    # load compressed matrix
+                    sum_dist, iterations = load_checkpoint(checkpoint_path)
+                    _, prefix_i, prefix_j, prefix_k = sum_dist.coords.tolist()
+                    prefix_data = sum_dist.data.tolist()
+                    del sum_dist
 
-                        # reset loop variables
-                        buffer_adds: List[List[int]] = [[] for _ in range(NUM_SOURCES)]
-                        buffer_sums: List[List[int]] = [[] for _ in range(NUM_SOURCES-1)]
+                    # reset loop variables
+                    buffer_adds: List[List[int]] = [[] for _ in range(NUM_SOURCES)]
+                    buffer_sums: List[List[int]] = [[] for _ in range(NUM_SOURCES-1)]
+
+                    print(f"Checkpoint saved at ", checkpoint_path)
 
 
 if __name__ == "__main__":
@@ -214,7 +224,7 @@ if __name__ == "__main__":
         "--output-dir",
         type=str,
         help="Directory in which the output estimation will be stored",
-        default=str(ROOT_DIRECTORY / "logs/vqvae_sum_distribution"),
+        default=str(ROOT_DIRECTORY / "logs/vqvae_sum_distribution_gm"),
     )
     parser.add_argument("--epochs", type=int,
                         help="Number of epochs", default=100)

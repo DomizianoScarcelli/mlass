@@ -14,7 +14,7 @@ from torchvision.utils import make_grid
 from .utils import CONFIG_DIR, CONFIG_STORE, ROOT_DIR
 
 NUM_SOURCES: int = 3
-RESTORE_FROM: Optional[int] = None
+RESTORE_FROM: Optional[int] = 17
 
 def roll(x, n):
     return torch.cat((x[:, -n:], x[:, :-n]), dim=1)
@@ -202,7 +202,7 @@ def main(cfg):
         step = train(train_loader, sums, model, cfg, writer, step)
         loss = evaluate(test_loader, sums, model, cfg, writer, step)
 
-        print("loss = {:f} at epoch {:f}".format(loss, epoch + 1 + RESTORE_FROM if RESTORE_FROM is not None else 0))
+        print("loss = {:f} at epoch {:f}".format(loss, epoch + 1 + RESTORE_FROM if RESTORE_FROM is not None else epoch+1))
         writer.add_scalar("loss/testing_loss", loss, epoch + 1)
 
         if (epoch == 0) or (loss < best_loss):
