@@ -66,9 +66,6 @@ class SparseDirectedGraphicalModel:
         # Divide each value in the original tensor by the corresponding sum
         normalized_values = values / sums_values[indices[-1]]
 
-        # # Apply log to the normalized values
-        # log_values = torch.log(normalized_values + 1e-12)
-
         # Create a new sparse tensor with the updated values
         result = torch.sparse_coo_tensor(indices, normalized_values, size=shape)
 
@@ -168,7 +165,7 @@ class SparseDirectedGraphicalModel:
         marginals = torch.stack(self.marginal_results)
         # marginals = self.one_shot(mixture[i])
 
-        result = self.single_sample(marginals, topk=False)
+        result = self.single_sample(marginals, topk=64)
         return result
 
     # def one_shot(self, token: torch.Tensor) -> torch.Tensor:

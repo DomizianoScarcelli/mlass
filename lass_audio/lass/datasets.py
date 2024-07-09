@@ -219,7 +219,7 @@ class TrackMultipleDataset(SeparationDataset):
 class ChunkedMultipleDataset(TrackMultipleDataset):
     def __init__(
         self,
-        instruments_audio_dir: List[Union[str, Path]],
+        instruments_audio_dir: List[Path],
         sample_rate: int,
         max_chunk_size: int,
         min_chunk_size: int,
@@ -242,7 +242,7 @@ class ChunkedMultipleDataset(TrackMultipleDataset):
         assert len(self.index_to_chunk) == len(self.index_to_file)
 
     @functools.lru_cache(1024)
-    def load_tracks(self, filename: str) -> Tuple[torch.Tensor, torch.Tensor]:
+    def load_tracks(self, filename: str) -> List[torch.Tensor]:
         return self.get_tracks(filename)
 
     def __len__(self):
