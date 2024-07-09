@@ -2,7 +2,7 @@ import os
 import multiprocessing as mp
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, List
+from typing import Any, List, Optional
 import torch
 from tqdm import tqdm
 import hydra
@@ -10,20 +10,31 @@ import torch
 from omegaconf import MISSING
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.utils import make_grid
+
 from .utils import CONFIG_DIR, CONFIG_STORE, ROOT_DIR
 
-NUM_SOURCES = 3
-RESTORE_FROM = 224
+NUM_SOURCES: int = 3
+RESTORE_FROM: Optional[int] = None
 
 def roll(x, n):
     return torch.cat((x[:, -n:], x[:, :-n]), dim=1)
 
-def split_images_by_step(images: torch.Tensor, batch_size: int, step: int) -> torch.Tensor:
+#def split_images_by_step(images: torch.Tensor, batch_size: int, step: int) -> torch.Tensor:
+#    #TODO: try and implement lass_audio versio of split_datapoints_by_step, it may be more correct
+#    image_batches = []
+#    batched_images_size = batch_size // step
+#    for i in range(len(images) // batched_images_size):
+#        image_batches.append(
+#            images[i * batched_images_size: (i + 1) * batched_images_size])
+#    result = torch.stack(image_batches)
+#    return result
+
+def split_images_by_step(datapoints: torch.Tensor, batch_size: int, step: int) -> torch.Tensor:
     image_batches = []
-    batched_images_size = batch_size // step
-    for i in range(len(images) // batched_images_size):
+    batched_size = batch_size // step
+    for i in range(step):
         image_batches.append(
-            images[i * batched_images_size: (i + 1) * batched_images_size])
+            datapoints[i * batched_size: (i + 1) * batched_size])
     result = torch.stack(image_batches)
     return result
 
@@ -173,7 +184,7 @@ def main(cfg):
         param.requires_grad = False
     
     if RESTORE_FROM is None:
-        print(f"Creating empyy sums")
+        print(f"Creating empty sums")
         sums = torch.zeros(NUM_SOURCES-1, cfg.num_codes, cfg.num_codes, cfg.num_codes).to(cfg.device)
     else:
         print(f"Loaded sums from epoch {RESTORE_FROM}")
@@ -187,7 +198,7 @@ def main(cfg):
 
     step = 0
     best_loss = -1.0
-    for epoch in tqdm(range(cfg.num_epochs - RESTORE_FROM if RESTORE_FROM is not None else 0)):
+    for epoch in tqdm(range(cfg.num_epochs - RESTORE_FROM if RESTORE_FROM is not None else cfg.num_epochs)):
         step = train(train_loader, sums, model, cfg, writer, step)
         loss = evaluate(test_loader, sums, model, cfg, writer, step)
 

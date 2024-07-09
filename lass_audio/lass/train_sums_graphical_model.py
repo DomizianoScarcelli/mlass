@@ -1,7 +1,7 @@
 import argparse
 import re
-from pathlib import Path
-from typing import Sequence, Tuple, Union
+from pathlib import Path 
+from typing import Sequence, Tuple, Union, List
 
 import numpy as np
 import sparse
@@ -16,6 +16,24 @@ from .utils import ROOT_DIRECTORY
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+NUM_SOURCES = 3
+
+def split_datapoints_by_step(datapoints: torch.Tensor, batch_size: int, step: int) -> torch.Tensor:
+    batches = []
+    batched_size = batch_size // step
+    for i in range(step):
+        batches.append(
+            datapoints[i * batched_size: (i + 1) * batched_size])
+    result = torch.stack(batches)
+    return result
+
+def get_mixtures(datapoints: torch.Tensor) -> torch.Tensor:
+    mixtures = []
+    for i in range(2, len(datapoints)+1):
+        # Build the mixtures of the images up to index i
+        mixture = torch.mean(datapoints[:i], dim=0)
+        mixtures.append(mixture)
+    return torch.stack(mixtures)
 
 def load_checkpoint(checkpoint_path: Union[Path, str]) -> Tuple[sparse.COO, int]:
     """Load ceckpoint containing the distribution of sum of the VQ-VAE
@@ -82,7 +100,6 @@ def estimate_distribution(
     # instantiate the vqvae model and audio dataset
     vqvae = make_vqvae(hps, device)
     audio_dataset = FilesAudioDataset(hps)
-    
 
     # prepare data-loader
     dataset_loader = DataLoader(
@@ -99,15 +116,15 @@ def estimate_distribution(
     # load checkpoint if available
     if checkpoint_path is not None:
         sum_dist, iterations = load_checkpoint(checkpoint_path)
-        prefix_i, prefix_j, prefix_k = sum_dist.coords.tolist()
+        _, prefix_i, prefix_j, prefix_k = sum_dist.coords.tolist()
         prefix_data = sum_dist.data.tolist()
         del sum_dist
     else:
         prefix_i, prefix_j, prefix_k, prefix_data = [], [], [], []
         iterations = 0
 
-    # initialize loop variables
-    buffer_add_1, buffer_add_2, buffer_sum = [], [], []
+    buffer_adds: List[List[int]] = [[] for _ in range(NUM_SOURCES)]
+    buffer_sums: List[List[int]] = [[] for _ in range(NUM_SOURCES-1)]
 
     # run estimation loop
     with torch.no_grad():
@@ -116,42 +133,64 @@ def estimate_distribution(
                 x = audio_preprocess(batch, hps=hps)
 
                 # get tracks from batch
-                x_1 = x[: batch_size // 2].to(device)
-                x_2 = x[batch_size // 2:].to(device)
-                x_sum = alpha[0] * x_1 + alpha[1] * x_2
+                xs = split_datapoints_by_step(x, batch_size, step=NUM_SOURCES)
+                print("xs shape: ", xs.shape)
+                mixtures = get_mixtures(datapoints=xs)
+                print("mixtures shape: ", mixtures.shape)
+
+                #TODO: continue
 
                 # compute latent vectors
-                buffer_add_1.extend(compute_latent(x_1, vqvae, vqvae_level))
-                buffer_add_2.extend(compute_latent(x_2, vqvae, vqvae_level))
-                buffer_sum.extend(compute_latent(x_sum, vqvae, vqvae_level))
+                for i, x_i in enumerate(xs):
+                    buffer_adds[i].extend(compute_latent(x_i, vqvae, vqvae_level))
+                for i, m_i in enumerate(mixtures):
+                    buffer_sums[i].extend(compute_latent(m_i, vqvae, vqvae_level))
 
                 # save output
                 iterations += 1
-                if iterations % save_iters == 0:
-                    sum_dist = sparse.COO(
-                        coords=[
-                            prefix_i + buffer_add_1 + buffer_add_2,
-                            prefix_j + buffer_add_2 + buffer_add_1,
-                            prefix_k + buffer_sum + buffer_sum,
-                        ],
-                        data=prefix_data + [1] * (len(buffer_add_1) * 2),
-                        shape=[latent_bins, latent_bins, latent_bins],
-                    )
+                #NOTE: save_iters defaults to 500
+                if iterations % save_iters == 0: 
+                    if NUM_SOURCES not in [2,3]:
+                        raise NotImplementedError("Train sums implemeneted just for 2 and 3 sources")
+                    for i in range(NUM_SOURCES-1):
+                        if i == 0:
+                            sum_dist = sparse.COO(
+                                coords=[
+                                    i,
+                                    prefix_i + buffer_adds[i] + buffer_adds[i+1],
+                                    prefix_j + buffer_adds[i+1] + buffer_adds[i],
+                                    prefix_k + buffer_sums[i] + buffer_sums[i],
+                                ],
+                                data=prefix_data + [1] * (len(buffer_adds[i]) * 2),
+                                shape=[NUM_SOURCES-1, latent_bins, latent_bins, latent_bins],
+                            )
+                        else:
+                            sum_dist = sparse.COO(
+                                coords=[
+                                    i,
+                                    prefix_i + buffer_sums[i-1] + buffer_adds[i+1],
+                                    prefix_j + buffer_adds[i+1] + buffer_sums[i-1],
+                                    prefix_k + buffer_sums[i] + buffer_sums[i],
+                                ],
+                                data=prefix_data + [1] * (len(buffer_adds[i]) * 2),
+                                shape=[NUM_SOURCES-1, latent_bins, latent_bins, latent_bins],
+                            )
 
-                    # store results
-                    output_dir = Path(output_dir)
-                    output_dir.mkdir(parents=True, exist_ok=True)
-                    checkpoint_path = output_dir / f"sum_dist_{iterations}.npz"
-                    sparse.save_npz(str(checkpoint_path), sum_dist)
+                        # store results
+                        output_dir = Path(output_dir)
+                        output_dir.mkdir(parents=True, exist_ok=True)
+                        checkpoint_path = output_dir / f"sum_dist_{iterations}.npz"
+                        sparse.save_npz(str(checkpoint_path), sum_dist)
 
-                    # load compressed matrix
-                    sum_dist, iterations = load_checkpoint(checkpoint_path)
-                    prefix_i, prefix_j, prefix_k = sum_dist.coords.tolist()
-                    prefix_data = sum_dist.data.tolist()
-                    del sum_dist
+                        # load compressed matrix
+                        sum_dist, iterations = load_checkpoint(checkpoint_path)
+                        _, prefix_i, prefix_j, prefix_k = sum_dist.coords.tolist()
+                        prefix_data = sum_dist.data.tolist()
+                        del sum_dist
 
-                    # reset loop variables
-                    buffer_add_1, buffer_add_2, buffer_sum = [], [], []
+                        # reset loop variables
+                        buffer_adds: List[List[int]] = [[] for _ in range(NUM_SOURCES)]
+                        buffer_sums: List[List[int]] = [[] for _ in range(NUM_SOURCES-1)]
 
 
 if __name__ == "__main__":
