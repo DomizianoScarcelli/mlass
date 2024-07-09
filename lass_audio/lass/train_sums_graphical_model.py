@@ -116,11 +116,11 @@ def estimate_distribution(
     # load checkpoint if available
     if checkpoint_path is not None:
         sum_dist, iterations = load_checkpoint(checkpoint_path)
-        _, prefix_i, prefix_j, prefix_k = sum_dist.coords.tolist()
+        prefix_s, prefix_i, prefix_j, prefix_k = sum_dist.coords.tolist()
         prefix_data = sum_dist.data.tolist()
         del sum_dist
     else:
-        prefix_i, prefix_j, prefix_k, prefix_data = [], [], [], []
+        prefix_s, prefix_i, prefix_j, prefix_k, prefix_data = [], [], [], [], []
         iterations = 0
 
     buffer_adds: List[List[int]] = [[] for _ in range(NUM_SOURCES)]
@@ -158,7 +158,7 @@ def estimate_distribution(
                     for i in range(NUM_SOURCES-1):
                         if i == 0:
                             coords = [
-                                    [i] * len(buffer_adds[0]) * 2,
+                                    prefix_s + [i] * len(buffer_adds[0]) * 2,
                                     prefix_i + buffer_adds[i] + buffer_adds[i+1],
                                     prefix_j + buffer_adds[i+1] + buffer_adds[i],
                                     prefix_k + buffer_sums[i] + buffer_sums[i]
@@ -169,7 +169,7 @@ def estimate_distribution(
                             print(f"i: {i} | Data len: ", len(data))
                         else:
                             coords=[
-                                coords[0] + [i] * len(buffer_adds[0]) * 2,
+                                coords[0] + prefix_s + [i] * (len(buffer_adds[0]) + len(buffer_sums[0])),
                                 coords[1] + prefix_i + buffer_sums[i-1] + buffer_adds[i+1],
                                 coords[2] + prefix_j + buffer_adds[i+1] + buffer_sums[i-1],
                                 coords[3] + prefix_k + buffer_sums[i] + buffer_sums[i],
@@ -192,7 +192,7 @@ def estimate_distribution(
 
                     # load compressed matrix
                     sum_dist, iterations = load_checkpoint(checkpoint_path)
-                    _, prefix_i, prefix_j, prefix_k = sum_dist.coords.tolist()
+                    prefix_s, prefix_i, prefix_j, prefix_k = sum_dist.coords.tolist()
                     prefix_data = sum_dist.data.tolist()
                     del sum_dist
 
