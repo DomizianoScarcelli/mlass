@@ -44,8 +44,8 @@ class SparseDirectedGraphicalModel:
         
         # Take the log
         sums = self._normalize_matrix(sums)
-        sums = permute_sparse(sums, (2,0,1))
-        self.p_mmzs = sums.unsqueeze(0)
+        sums = permute_sparse(sums, (0,3,1,2))
+        self.p_mmzs = sums
         
         # self.pm = torch.sparse.sum(self.p_mmzs, dim=[2,3])[-1].to_dense().squeeze()
         self.pm = 0 #TODO: just for debug
