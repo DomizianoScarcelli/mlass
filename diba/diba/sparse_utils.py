@@ -79,8 +79,6 @@ def sparse_expand(t, dims):
 
     return expanded_sparse_tensor
 
-
-
 def sparse_expand_as(t1: torch.Tensor, t2:torch.Tensor) -> torch.Tensor:
     return sparse_expand(t1, dims=list(t2.shape))
 
@@ -98,6 +96,13 @@ def sparse_normalize(t: torch.Tensor, dims) -> torch.Tensor:
     expanded_integral = sparse_expand_as(integral, t)
     result = sparse_elementwise_div(t, expanded_integral)
     return result
+
+def sparse_normalize_alt(t: sparse.COO, dims) -> torch.Tensor:
+    integrals = t.sum(axis=dims, keepdims=True)
+    integrals = sparse.COO(
+        integrals.coords, integrals.data, shape=integrals.shape, fill_value=1
+    )
+    return t / integrals
 
 if __name__ == "__main__":
     pass
