@@ -4,6 +4,8 @@ import math
 from diba.diba import SeparationPrior
 import numpy as np
 from typing import List, Optional, Union
+
+from diba.diba.sparse_utils import convert_torch_coo_to_sparse_coo, sparse_elementwise_div, sparse_expand, sparse_expand_as, sparse_normalize, sparse_permute, convert_sparse_coo_to_torch_coo
 from .utils import normalize_logits
 from functools import wraps
 import sparse
@@ -19,11 +21,6 @@ def timeit(func):
         # print(f"Function '{func.__name__}' executed in {elapsed_time:.4f} seconds")
         return result
     return wrapper
-
-def permute_sparse(input, dims):
-    #source: https://github.com/pytorch/pytorch/issues/78422
-    dims = torch.LongTensor(dims)
-    return torch.sparse_coo_tensor(indices=input._indices()[dims], values=input._values(), size=torch.Size(torch.tensor(input.size())[dims]))
 
 class SparseDirectedGraphicalModel:
     """
@@ -41,55 +38,30 @@ class SparseDirectedGraphicalModel:
         self.priors = priors
         self.past_key = [None for _ in range(num_sources)]
         self.num_beams = 10
+        self.device = sums.device
         
         # Take the log
-        sums = self._normalize_matrix(sums)
         if len(sums.shape) == 3:
             sums = sums.unsqueeze(0)
-        sums = permute_sparse(sums, (0,3,1,2))
+        sums = sparse_permute(sums, (0,3,1,2))
+        print("Sums after permute", sums)
+        sums = sparse_normalize(sums, dims=[2,3])
         self.p_mmzs = sums
-
-        print("Sums shape: ", sums.shape)
+        print("Sums after normalization", sums)
         
         # self.pm = torch.sparse.sum(self.p_mmzs, dim=[2,3])[-1].to_dense().squeeze()
         self.pm = 0 #TODO: just for debug
 
-    def _normalize_matrix(self, torch_coo_tensor: torch.Tensor) -> torch.Tensor:
-        torch_coo_tensor = torch_coo_tensor.coalesce()
-        indices = torch_coo_tensor.indices()
-        values = torch_coo_tensor.values()
-        shape = torch_coo_tensor.shape
-
-        # Sum along the last dimension
-        sums = torch.sparse.sum(torch_coo_tensor, dim=-1).unsqueeze(-1)
-
-        # Ensure sums has a non-zero value to avoid division by zero
-        sums_values = sums.coalesce().values()
-        sums_values[sums_values == 0] = 1.0
-
-        # Divide each value in the original tensor by the corresponding sum
-        normalized_values = values / sums_values[indices[-1]]
-
-        # Create a new sparse tensor with the updated values
-        result = torch.sparse_coo_tensor(indices, normalized_values, size=shape)
-
-        print(result)
-
-        return result
            
     @timeit 
-    def compute_priors(self, past) -> List[torch.Tensor]:
-        # p_zs[i] = p(z_i)
+    def compute_priors(self, past) -> List[SeparationPrior]:
         self.p_zs = torch.empty((self.num_sources, self.num_beams, self.K))
         for i in range(self.num_sources):
             log_prior, past_key = self.priors[i]._get_logits(
                     past[i],
                     self.past_key[i])
             log_prior = normalize_logits(log_prior) - self.pm
-
-            # NOTE: this is pretty much useless for the UnconditionedTransformerPrior since the past key is always none
             self.past_key[i] = past_key
-            
             self.p_zs[i] = log_prior
                 
         return self.priors
@@ -108,6 +80,7 @@ class SparseDirectedGraphicalModel:
         old_message = torch.logsumexp(prior + self.forward_results[i-1], dim=-1)
         final_message = torch.logsumexp(old_message + sums, dim=1)
         return final_message
+
     @timeit
     def backward_pass(self, i: int, token_idx: torch.Tensor):
         """
@@ -135,7 +108,7 @@ class SparseDirectedGraphicalModel:
             return prior + torch.logsumexp(self.forward_results[i-1] + self.backward_results[i], dim=0)
     
     @timeit
-    def single_sample(self, marginals: torch.Tensor, topk: Union[bool, int]= True) -> torch.Tensor:
+    def single_sample(self, marginals: torch.Tensor, topk: Union[bool, int]=False) -> torch.Tensor:
         if topk:
             topk_values, topk_indices = torch.topk(marginals, k=topk, dim=-1)
             m = torch.full_like(marginals, fill_value=math.log(1e-12))
@@ -169,7 +142,7 @@ class SparseDirectedGraphicalModel:
         marginals = torch.stack(self.marginal_results)
         # marginals = self.one_shot(mixture[i])
 
-        result = self.single_sample(marginals, topk=64)
+        result = self.single_sample(marginals, topk=False)
         return result
 
     # def one_shot(self, token: torch.Tensor) -> torch.Tensor:

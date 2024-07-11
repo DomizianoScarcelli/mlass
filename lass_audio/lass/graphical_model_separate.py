@@ -14,6 +14,7 @@ from torch.utils.data import DataLoader
 from diba.diba.interfaces import SeparationPrior
 from diba.diba.sparse_graphical_model import SparseDirectedGraphicalModel
 
+from diba.diba.sparse_utils import convert_sparse_coo_to_torch_coo
 from lass_audio.lass.datasets import SeparationDataset
 from lass_audio.lass.datasets import SeparationSubset
 from lass_audio.lass.diba_interfaces import JukeboxPrior, SparseLikelihood
@@ -302,11 +303,7 @@ def main(
 
     with open(sum_frequencies_path, "rb") as f:
         sums_coo: sparse.COO = sparse.load_npz(sum_frequencies_path)
-        coords = torch.tensor(
-            sums_coo.coords, device=device, dtype=torch.long)
-        data = torch.tensor(
-            sums_coo.data, device=device, dtype=torch.float)
-        sums = torch.sparse_coo_tensor(coords, data, size=sums_coo.shape)
+        sums = convert_sparse_coo_to_torch_coo(sums_coo, device)
         print("Sums: ", sums)
 
     # create separator
