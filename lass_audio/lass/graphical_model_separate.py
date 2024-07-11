@@ -87,7 +87,7 @@ class SparseDirectedGraphicalSeparator(Separator):
         self.gm = SparseDirectedGraphicalModel(
                 priors = list(priors.values()),
                 sums=sums,
-                num_tokens=sums.shape[0],
+                num_tokens=sums.shape[-1],
                 num_sources=2)
 
         # lambda x: vqvae.encode(x.unsqueeze(-1), vqvae_level, vqvae_level + 1).view(-1).tolist()
@@ -199,6 +199,8 @@ def separate_dataset(
         seps = separator.separate(mixture=mixture)
         chunk_path.mkdir(parents=True)
 
+        print("Number of separated signals: ", len(seps.values()))
+        print("Number of original signals: ", len(origs))
         # save separated audio
         save_fn(
             separated_signals=[sep.unsqueeze(0) for sep in seps.values()],
@@ -225,13 +227,11 @@ def save_separation(
         print(ori.shape, sep.shape)
         sdr = compute_sdr(ori, sep)
         print(f"SDR is: ", sdr)
-        sdr = compute_sdr(sep, ori)
-        print(f"SDR is: ", sdr)
         torchaudio.save(str(path / f"ori{i+1}.wav"),
                         ori.cpu(), sample_rate=sample_rate)
         torchaudio.save(str(path / f"sep{i+1}.wav"),
                         sep.cpu(), sample_rate=sample_rate)
-        break
+        
 
 
 def main(
@@ -241,6 +241,7 @@ def main(
     prior_1_path: Path = audio_root / "checkpoints/prior_bass_44100.pth.tar",
     prior_2_path: Path = audio_root / "checkpoints/prior_drums_44100.pth.tar",
     sum_frequencies_path: Path = audio_root / "checkpoints/sum_frequencies.npz",
+    # sum_frequencies_path: Path = audio_root / "logs/vqvae_sum_distribution_gm/sum_dist_3.npz",
     vqvae_type: str = "vqvae",
     prior_1_type: str = "small_prior",
     prior_2_type: str = "small_prior",

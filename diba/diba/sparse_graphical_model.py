@@ -44,8 +44,12 @@ class SparseDirectedGraphicalModel:
         
         # Take the log
         sums = self._normalize_matrix(sums)
+        if len(sums.shape) == 3:
+            sums = sums.unsqueeze(0)
         sums = permute_sparse(sums, (0,3,1,2))
         self.p_mmzs = sums
+
+        print("Sums shape: ", sums.shape)
         
         # self.pm = torch.sparse.sum(self.p_mmzs, dim=[2,3])[-1].to_dense().squeeze()
         self.pm = 0 #TODO: just for debug
@@ -85,7 +89,7 @@ class SparseDirectedGraphicalModel:
 
             # NOTE: this is pretty much useless for the UnconditionedTransformerPrior since the past key is always none
             self.past_key[i] = past_key
-
+            
             self.p_zs[i] = log_prior
                 
         return self.priors

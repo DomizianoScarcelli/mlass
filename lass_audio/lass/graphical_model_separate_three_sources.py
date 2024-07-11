@@ -44,7 +44,7 @@ class SparseDirectedGraphicalSeparator(Separator):
                 priors = list(priors.values()),
                 sums=sums,
                 num_tokens=sums.shape[-1],
-                num_sources=3)
+                num_sources=3) #TODO: change
 
         # lambda x: vqvae.encode(x.unsqueeze(-1), vqvae_level, vqvae_level + 1).view(-1).tolist()
         self.encode_fn = encode_fn
@@ -101,6 +101,8 @@ def separate_dataset(
         chunk_path.mkdir(parents=True)
 
         # save separated audio
+        print("Number of separated signals: ", len(seps.values()))
+        print("Number of original signals: ", len(origs))
         save_fn(
             separated_signals=[sep.unsqueeze(0) for sep in seps.values()],
             original_signals=[ori.squeeze(0) for ori in origs],
@@ -132,7 +134,6 @@ def save_separation(
                         ori.cpu(), sample_rate=sample_rate)
         torchaudio.save(str(path / f"sep{i+1}.wav"),
                         sep.cpu(), sample_rate=sample_rate)
-        break
 
 
 def main(

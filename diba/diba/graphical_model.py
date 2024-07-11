@@ -26,6 +26,7 @@ class DirectedGraphicalModel:
         self.p_mmzs -= torch.logsumexp(self.p_mmzs, dim=[2,3]).unsqueeze(2).unsqueeze(3)
         # self.p_mmzs -= torch.logsumexp(self.p_mmzs, dim=1).unsqueeze(1)
         self.pm = torch.logsumexp(self.p_mmzs, dim=[2,3])[-1].squeeze()
+        # self.pm = 0
     
     def compute_priors(self, past) -> List[torch.Tensor]:
         # p_zs[i] = p(z_i)
