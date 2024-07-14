@@ -45,12 +45,10 @@ class SparseDirectedGraphicalModel:
             sums = sums.unsqueeze(0)
         sums = sparse_permute(sums, (0,3,1,2))
         print("Sums after permute", sums)
-        sums = sparse_normalize(sums, dims=[2,3])
+        sums = sparse_normalize(sums, dim=1)
         self.p_mmzs = sums
         print("Sums after normalization", sums)
-        
-        # self.pm = torch.sparse.sum(self.p_mmzs, dim=[2,3])[-1].to_dense().squeeze()
-        self.pm = 0 #TODO: just for debug
+        self.pm = 0 
 
            
     @timeit 

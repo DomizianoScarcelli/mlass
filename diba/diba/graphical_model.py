@@ -23,12 +23,12 @@ class DirectedGraphicalModel:
 
         self.p_mmzs = torch.log(1e-12 + sums)
         print(self.p_mmzs.shape)
-        self.p_mmzs -= torch.logsumexp(self.p_mmzs, dim=[2,3]).unsqueeze(2).unsqueeze(3)
-        # self.p_mmzs -= torch.logsumexp(self.p_mmzs, dim=1).unsqueeze(1)
-        self.pm = torch.logsumexp(self.p_mmzs, dim=[2,3])[-1].squeeze()
-        # self.pm = 0
+        # self.p_mmzs -= torch.logsumexp(self.p_mmzs, dim=[2,3]).unsqueeze(2).unsqueeze(3)
+        self.p_mmzs -= torch.logsumexp(self.p_mmzs, dim=1).unsqueeze(1)
+        # self.pm = torch.logsumexp(self.p_mmzs, dim=[2,3])[-1].squeeze()
+        self.pm = 0
     
-    def compute_priors(self, past) -> List[torch.Tensor]:
+    def compute_priors(self, past) -> List[SeparationPrior]:
         # p_zs[i] = p(z_i)
         self.p_zs = torch.empty((self.num_sources, self.K, self.K))
         for i in range(self.num_sources):
@@ -115,7 +115,7 @@ class DirectedGraphicalModel:
         marginals = torch.stack(self.marginal_results)
         # marginals = self.one_shot(mixture[i])
 
-        result = self.single_sample(marginals, topk=False)
+        result = self.single_sample(marginals, topk=64)
         return result
 
     # def one_shot(self, token: torch.Tensor) -> torch.Tensor:

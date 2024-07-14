@@ -14,20 +14,10 @@ from torchvision.utils import make_grid
 from .utils import CONFIG_DIR, CONFIG_STORE, ROOT_DIR
 
 NUM_SOURCES: int = 3
-RESTORE_FROM: Optional[int] = 17
+RESTORE_FROM: Optional[int] = 210
 
 def roll(x, n):
     return torch.cat((x[:, -n:], x[:, :-n]), dim=1)
-
-#def split_images_by_step(images: torch.Tensor, batch_size: int, step: int) -> torch.Tensor:
-#    #TODO: try and implement lass_audio versio of split_datapoints_by_step, it may be more correct
-#    image_batches = []
-#    batched_images_size = batch_size // step
-#    for i in range(len(images) // batched_images_size):
-#        image_batches.append(
-#            images[i * batched_images_size: (i + 1) * batched_images_size])
-#    result = torch.stack(image_batches)
-#    return result
 
 def split_images_by_step(datapoints: torch.Tensor, batch_size: int, step: int) -> torch.Tensor:
     image_batches = []
@@ -70,10 +60,10 @@ def train(data_loader, sums, model, args, writer, step):
         for i in range(NUM_SOURCES-1):
             if i == 0:
                 sums[i, codes_mixtures[i], codes[i], codes[i+1]] += 1
-                sums[i, codes_mixtures[i], codes[i+1], codes[i]] += 1
+                # sums[i, codes_mixtures[i], codes[i+1], codes[i]] += 1
             else:
                 sums[i, codes_mixtures[i], codes_mixtures[i-1], codes[i+1]] += 1
-                sums[i, codes_mixtures[i], codes[i+1], codes_mixtures[i-1]] += 1
+                # sums[i, codes_mixtures[i], codes[i+1], codes_mixtures[i-1]] += 1
         step += 1
     return step
 
@@ -104,10 +94,10 @@ def evaluate(data_loader, sums, model, args, writer, step):
             for i in range(NUM_SOURCES-1):
                 if i == 0:
                     loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes[i], codes[i+1]] + 1e-16))
-                    loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes[i+1], codes[i]]) + 1e-16)
+                    # loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes[i+1], codes[i]]) + 1e-16)
                 else:
                     loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes_mixtures[i-1], codes[i+1]] + 1e-16))
-                    loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes[i+1], codes_mixtures[i-1]] + 1e-16))
+                    # loss += torch.mean(-torch.log(sums_test[i, codes_mixtures[i], codes[i+1], codes_mixtures[i-1]] + 1e-16))
 
         loss /= len(data_loader)         
         writer.add_scalar("loss/test/loss", loss.item(), step)

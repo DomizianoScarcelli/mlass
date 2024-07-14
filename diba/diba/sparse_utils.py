@@ -89,15 +89,40 @@ def sparse_elementwise_div(t1: torch.Tensor, t2: torch.Tensor) -> torch.Tensor:
     t2_inverted = torch.sparse_coo_tensor(t2.indices(), 1/t2.values(), t2.shape)
     return t1 * t2_inverted
 
-def sparse_normalize(t: torch.Tensor, dims) -> torch.Tensor:
-    integral = t
-    for dim in dims:
-        integral = torch.sparse.sum(integral, dim=dim).unsqueeze(dim)
-    expanded_integral = sparse_expand_as(integral, t)
-    result = sparse_elementwise_div(t, expanded_integral)
+#def sparse_normalize(t: torch.Tensor, dims) -> torch.Tensor:
+#    #TODO: this has to be tested
+#    integral = t
+#    for dim in dims:
+#        integral = torch.sparse.sum(integral, dim=dim).unsqueeze(dim)
+#    expanded_integral = sparse_expand_as(integral, t)
+#    result = sparse_elementwise_div(t, expanded_integral)
+#    return result
+
+def sparse_normalize(t: torch.Tensor, dim:int) -> torch.Tensor:
+    t = t.coalesce()
+    indices = t.indices()
+    values = t.values()
+    shape = t.shape
+
+    # Sum along the last dimension
+    sums = torch.sparse.sum(t, dim=dim).unsqueeze(dim)
+
+    # Ensure sums has a non-zero value to avoid division by zero
+    sums_values = sums.coalesce().values()
+    sums_values[sums_values == 0] = 1.0
+
+    # Divide each value in the original tensor by the corresponding sum
+    normalized_values = values / sums_values[indices[dim]]
+
+    # Create a new sparse tensor with the updated values
+    result = torch.sparse_coo_tensor(indices, normalized_values, size=shape)
+
+    print(result)
+
     return result
 
 def sparse_normalize_alt(t: sparse.COO, dims) -> torch.Tensor:
+    #NOTE: this doesn't work on M1 macos because of numba + sparse
     integrals = t.sum(axis=dims, keepdims=True)
     integrals = sparse.COO(
         integrals.coords, integrals.data, shape=integrals.shape, fill_value=1

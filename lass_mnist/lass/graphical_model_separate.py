@@ -224,8 +224,10 @@ def main(cfg):
     NUM_SOURCES = 2
     priors = [UnconditionedTransformerPrior(transformer=transformer, sos=0) for _ in range(NUM_SOURCES)]
 
-    p_mmzs_path = "./lass_mnist/models/sums-MNIST-gm/best_93.pt"
+    p_mmzs_path = "./lass_mnist/models/sums-MNIST-gm/best_65.pt"
+    # p_mmzs_path = cfg.checkpoints.sums 
     with open(p_mmzs_path, "rb") as f:
+        # sums = torch.load(f).permute(2,0,1).unsqueeze(0)
         sums = torch.load(f)
 
     graphical_model = DirectedGraphicalModel(priors=priors,
@@ -267,7 +269,7 @@ def main(cfg):
             gen1lat,
             gen2lat,
             gtm,
-            n_iterations=1, #TODO: used to remove refine latents, just for debug
+            n_iterations=500, #TODO: used to remove refine latents, just for debug
             learning_rate=1e-1,
         )
 
