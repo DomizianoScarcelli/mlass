@@ -51,9 +51,8 @@ def allgather_lists(xs):
 def setup_dist_from_mpi(
     master_addr="127.0.0.1", backend="gloo", port=29500, n_attempts=5, verbose=False
 ):
-    # if dist.is_available():
-    #     return _setup_dist_from_mpi(master_addr, backend, port, n_attempts, verbose)
-    # else:
+    if dist.is_available():
+        return _setup_dist_from_mpi(master_addr, backend, port, n_attempts, verbose)
     use_cuda = torch.cuda.is_available()
     print(f'Using cuda {use_cuda}')
 

@@ -137,16 +137,16 @@ def save_separation(
 
 
 def main(
-    audio_dirs: List[Path] = [audio_root / "data/bass_clone", audio_root / "data/bass", audio_root / "data/drums"],
+    audio_dirs: List[Path] = [audio_root / "data/piano", audio_root / "data/bass", audio_root / "data/drums"],
     vqvae_path: Path = audio_root / "checkpoints/vqvae.pth.tar",
-    prior_paths: List[Path] = [audio_root / "checkpoints/prior_bass_44100_clone.pth.tar",audio_root / "checkpoints/prior_bass_44100.pth.tar", audio_root / "checkpoints/prior_drums_44100.pth.tar"],
+    prior_paths: List[Path] = [audio_root / "checkpoints/prior_piano_44100.pth.tar",audio_root / "checkpoints/prior_bass_44100.pth.tar", audio_root / "checkpoints/prior_drums_44100.pth.tar"],
     # sum_frequencies_path: Path = audio_root / "checkpoints/sum_frequencies.npz",
     sum_frequencies_path: Path = audio_root / "logs/vqvae_sum_distribution_gm/sum_dist_3.npz",
     vqvae_type: str = "vqvae",
     prior_types: List[str] = ["small_prior", "small_prior", "small_prior"],
     max_sample_tokens: int = 1024,
     sample_rate: int = 44100,
-    save_path: Path = audio_root / "separated-audio",
+    save_path: Path = audio_root / "three-separated-audio",
     resume: bool = True,
     num_pairs: int = 100,
     seed: int = 0,

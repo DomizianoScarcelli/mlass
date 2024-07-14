@@ -140,7 +140,7 @@ class SparseDirectedGraphicalModel:
         marginals = torch.stack(self.marginal_results)
         # marginals = self.one_shot(mixture[i])
 
-        result = self.single_sample(marginals, topk=False)
+        result = self.single_sample(marginals, topk=64)
         return result
 
     # def one_shot(self, token: torch.Tensor) -> torch.Tensor:
