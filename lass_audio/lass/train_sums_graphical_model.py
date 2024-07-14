@@ -18,22 +18,22 @@ from tqdm import tqdm
 
 NUM_SOURCES = 3
 
-def split_datapoints_by_step(datapoints: torch.Tensor, batch_size: int, step: int) -> torch.Tensor:
+def split_datapoints_by_step(datapoints: torch.Tensor, batch_size: int, step: int, device) -> torch.Tensor:
     batches = []
     batched_size = batch_size // step
     for i in range(step):
         batches.append(
             datapoints[i * batched_size: (i + 1) * batched_size])
-    result = torch.stack(batches)
+    result = torch.stack(batches).to(device)
     return result
 
-def get_mixtures(datapoints: torch.Tensor) -> torch.Tensor:
+def get_mixtures(datapoints: torch.Tensor, device) -> torch.Tensor:
     mixtures = []
     for i in range(2, len(datapoints)+1):
         # Build the mixtures of the images up to index i
         mixture = torch.mean(datapoints[:i], dim=0)
         mixtures.append(mixture)
-    return torch.stack(mixtures)
+    return torch.stack(mixtures).to(device)
 
 def load_checkpoint(checkpoint_path: Union[Path, str]) -> Tuple[sparse.COO, int]:
     """Load ceckpoint containing the distribution of sum of the VQ-VAE
@@ -133,9 +133,9 @@ def estimate_distribution(
                 x = audio_preprocess(batch, hps=hps)
 
                 # get tracks from batch
-                xs = split_datapoints_by_step(x, batch_size, step=NUM_SOURCES)
+                xs = split_datapoints_by_step(x, batch_size, step=NUM_SOURCES, device=device)
                 assert xs.shape[0] == NUM_SOURCES
-                mixtures = get_mixtures(datapoints=xs)
+                mixtures = get_mixtures(datapoints=xs, device=device)
                 assert mixtures.shape[0] == NUM_SOURCES-1 
 
                 #TODO: continue
