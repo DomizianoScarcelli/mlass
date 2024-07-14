@@ -75,7 +75,7 @@ class SparseDirectedGraphicalModel:
         sums = torch.log(self.p_mmzs[i, token_idx].unsqueeze(0).to_dense() + 1e-12)
         if i == 0:
             return torch.logsumexp(prior + sums, dim=1)
-        old_message = torch.logsumexp(prior + self.forward_results[i-1], dim=-1)
+        old_message = torch.logsumexp(prior + self.forward_results[i-1], dim=0)
         final_message = torch.logsumexp(old_message + sums, dim=1)
         return final_message
 
@@ -91,7 +91,7 @@ class SparseDirectedGraphicalModel:
             return torch.logsumexp(prior + message, dim=-1)
         
         old_message = torch.logsumexp(sums + self.backward_results[i+1], dim=0)
-        final_message = torch.logsumexp(prior + old_message, dim=-1) 
+        final_message = torch.logsumexp(prior + old_message, dim=0) 
         return final_message
 
     @timeit 

@@ -53,7 +53,7 @@ class DirectedGraphicalModel:
         prior = torch.logsumexp(self.p_zs[i], dim=[0])
         if i == 0:
             return torch.logsumexp(prior + self.p_mmzs[i, token_idx].unsqueeze(0), dim=1)
-        old_message = torch.logsumexp(prior + self.forward_results[i-1], dim=-1)
+        old_message = torch.logsumexp(prior + self.forward_results[i-1], dim=0) # this was -1, but with 0 the performances are better
         final_message = torch.logsumexp(old_message + self.p_mmzs[i, token_idx].unsqueeze(0), dim=1)
         return final_message
 
@@ -67,7 +67,7 @@ class DirectedGraphicalModel:
             return torch.logsumexp(prior + message, dim=-1)
         
         old_message = torch.logsumexp(self.p_mmzs[i, token_idx].unsqueeze(0) + self.backward_results[i+1], dim=0)
-        final_message = torch.logsumexp(prior + old_message, dim=-1) 
+        final_message = torch.logsumexp(prior + old_message, dim=0) # this was -1, but with 0 the performances are better
         return final_message
 
  
