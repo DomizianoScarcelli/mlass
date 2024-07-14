@@ -51,9 +51,7 @@ class DirectedGraphicalModel:
         # shape is [256, 256, 256] = [K, K, K]
         # shape is [2, 256] = [num_sources, K]
         prior = torch.logsumexp(self.p_zs[i], dim=-1)
-        prior = self.p_zs[i]
         if i == 0:
-            # message = torch.logsumexp(prior, dim=0)
             return torch.logsumexp(self.p_mmzs[i, token_idx].unsqueeze(0) + prior, dim=1)
         old_message = torch.logsumexp(prior + self.forward_results[i-1], dim=-1) # this was -1, but with 0 the performances are better
         final_message = torch.logsumexp(self.p_mmzs[i, token_idx].unsqueeze(0) + old_message , dim=1)
@@ -65,17 +63,14 @@ class DirectedGraphicalModel:
         """
         prior = torch.logsumexp(self.p_zs[i+1], dim=-1)
         if i == self.num_sources-2:
-            # message = torch.logsumexp(self.p_mmzs[i, token_idx].unsqueeze(0), dim=0)
-            # return torch.logsumexp(prior + message, dim=-1)
             return torch.logsumexp(prior + self.p_mmzs[i, token_idx].unsqueeze(0), dim=-1)
         
         old_message = torch.logsumexp(self.p_mmzs[i, token_idx].unsqueeze(0) + self.backward_results[i+1], dim=0)
-        final_message = torch.logsumexp(prior + old_message, dim=0) # this was -1, but with 0 the performances are better
+        final_message = torch.logsumexp(prior + old_message, dim=-1) # this was -1, but with 0 the performances are better
         return final_message
 
  
     def compute_marginals(self, i: int) -> torch.Tensor:
-        # prior = torch.logsumexp(self.p_zs[i], dim=-1).unsqueeze(-1)
         prior = self.p_zs[i]
         if i == 0:
             return prior + self.backward_results[i] 
