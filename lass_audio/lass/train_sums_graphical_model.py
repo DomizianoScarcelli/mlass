@@ -169,12 +169,12 @@ def estimate_distribution(
                             print(f"i: {i} | Data len: ", len(data))
                         else:
                             coords=[
-                                coords[0] + prefix_s + [i] * (len(buffer_adds[0]) + len(buffer_sums[0])),
-                                coords[1] + prefix_i + buffer_sums[i-1] + buffer_adds[i+1],
-                                coords[2] + prefix_j + buffer_adds[i+1] + buffer_sums[i-1],
-                                coords[3] + prefix_k + buffer_sums[i] + buffer_sums[i],
+                                coords[0] + [i] * (len(buffer_adds[0]) + len(buffer_sums[0])),
+                                coords[1] + buffer_sums[i-1] + buffer_adds[i+1],
+                                coords[2] + buffer_adds[i+1] + buffer_sums[i-1],
+                                coords[3] + buffer_sums[i] + buffer_sums[i],
                             ]
-                            data += prefix_data + [1] * (len(buffer_adds[1]) * 2)
+                            data += [1] * (len(buffer_adds[1]) * 2)
                             print(f"i: {i} | Coords len: ", len(coords))
                             print(f"i: {i} | Coords elements len: ", [len(elem) for elem in coords])
                             print(f"i: {i} | Data len: ", len(data))

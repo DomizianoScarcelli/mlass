@@ -117,8 +117,6 @@ def sparse_normalize(t: torch.Tensor, dim:int) -> torch.Tensor:
     # Create a new sparse tensor with the updated values
     result = torch.sparse_coo_tensor(indices, normalized_values, size=shape)
 
-    print(result)
-
     return result
 
 def sparse_normalize_alt(t: sparse.COO, dims) -> torch.Tensor:
