@@ -7,6 +7,7 @@ import shutil
 
 audio_root = Path(__file__).parent.parent
 data_dir = audio_root / "data" 
+external_hhd_dir = "/Volumes/Seagate HDD/Brave"
 slakh_path = data_dir / "SLAKH"
 baby_slakh_path = data_dir / "babyslakh_16k"
 
@@ -36,6 +37,8 @@ def extract_stem(path: Path, desired_stem: str):
 
 def run():
     extract_stem(path=baby_slakh_path, desired_stem="piano")
+    extract_stem(path=baby_slakh_path, desired_stem="drums")
+    extract_stem(path=baby_slakh_path, desired_stem="bass")
 
 if __name__ == "__main__":
     run()

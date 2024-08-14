@@ -128,8 +128,6 @@ def save_separation(
         print(ori.shape, sep.shape)
         sdr = compute_sdr(ori, sep)
         print(f"SDR is: ", sdr)
-        sdr = compute_sdr(sep, ori)
-        print(f"SDR is: ", sdr)
         torchaudio.save(str(path / f"ori{i+1}.wav"),
                         ori.cpu(), sample_rate=sample_rate)
         torchaudio.save(str(path / f"sep{i+1}.wav"),
@@ -141,7 +139,7 @@ def main(
     vqvae_path: Path = audio_root / "checkpoints/vqvae.pth.tar",
     prior_paths: List[Path] = [audio_root / "checkpoints/prior_piano_44100.pth.tar",audio_root / "checkpoints/prior_bass_44100.pth.tar", audio_root / "checkpoints/prior_drums_44100.pth.tar"],
     # sum_frequencies_path: Path = audio_root / "checkpoints/sum_frequencies.npz",
-    sum_frequencies_path: Path = audio_root / "checkpoints/sum_dist_13500.npz",
+    sum_frequencies_path: Path = audio_root / "checkpoints/sum_dist_8800.npz",
     vqvae_type: str = "vqvae",
     prior_types: List[str] = ["small_prior", "small_prior", "small_prior"],
     max_sample_tokens: int = 1024,
