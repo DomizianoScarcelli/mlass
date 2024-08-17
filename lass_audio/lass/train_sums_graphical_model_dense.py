@@ -1,3 +1,9 @@
+"""
+NOTE: This file contains the same logic as `./train_sums_graphical_model`, but computes the tensor in the dense domain.
+The method IS NOT USED for the separation, but just in the "../tests/sums_test.py" in order to test the correctness of the
+tensor computed in the sparse domain.
+"""
+
 import argparse
 import re
 from pathlib import Path 
@@ -95,7 +101,9 @@ def estimate_distribution(
     rank, local_rank, device = setup_dist_from_mpi(port=29540)
 
     # get number of latent codes
-    latent_bins = hps.l_bins
+    #TODO: this is used to overrides the bins in order to reduce memory requirements
+    latent_bins = 128
+    # latent_bins = hps.l_bins
 
     # instantiate the vqvae model and audio dataset
     vqvae = make_vqvae(hps, device)

@@ -153,6 +153,7 @@ class SparseDirectedGraphicalModel:
     #     return torch.stack([marginal_0, marginal_1])
 
     def separate(self, mixture: torch.Tensor) -> torch.Tensor:
+        #NOTE: I'm pretty sure this is correct
         self.prior_past = torch.full((self.num_sources, self.K, len(mixture)+1), fill_value=-1, dtype=torch.long)
         self.prior_past[:,:, 0] = 0
         
