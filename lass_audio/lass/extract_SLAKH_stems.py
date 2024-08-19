@@ -8,12 +8,14 @@ import shutil
 audio_root = Path(__file__).parent.parent
 data_dir = audio_root / "data" 
 external_hhd_dir = Path("/Volumes/Seagate HDD/Brave/slakh2100_flac_redux/train")
+external_hdd_output_dir = Path("/Volumes/Seagate HDD/Brave/slakh processed/train")
 slakh_path = data_dir / "SLAKH"
 baby_slakh_path = data_dir / "babyslakh_16k"
 FORMAT = ".flac" 
 
 def extract_stem(path: Path, desired_stem: str):
-    new_stem_dir = data_dir / "extracted_stems"/ desired_stem
+    # new_stem_dir = data_dir / "extracted_stems"/ desired_stem
+    new_stem_dir = external_hdd_output_dir / "flac_stems" / desired_stem
     os.makedirs(new_stem_dir, exist_ok=True)
     for track in tqdm(os.listdir(path), f"Extracting stem: {desired_stem}"):
         full_path = path / track

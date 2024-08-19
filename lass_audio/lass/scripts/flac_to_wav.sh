@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Directory containing FLAC files
-input_dir="/Users/dov/Desktop/wip-projects/latent-autoregressive-source-separation/lass_audio/data/extracted_stems/piano"
-output_dir="/Volumes/Seagate HDD/Brave/slakh processed/train/piano"
+input_dir="/Volumes/Seagate HDD/Brave/slakh processed/train/flac_stems/bass"
+output_dir="/Volumes/Seagate HDD/Brave/slakh processed/train/wav_stems/bass"
 
 # Iterate over all .flac files in the directory
 for file in "$input_dir"/*.flac; do

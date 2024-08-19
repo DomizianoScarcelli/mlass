@@ -6,90 +6,149 @@ compute a smaller sums using a smaller dataset and a smaller K and compare it
 to its dense tensor counterpart. If they are equal, then the tensor in the
 sparse domain is computer correctly. This cannot be done for the real larger K,
 since the memory requirement is too large.
+
+TODO: there is a problem, since the VQVAE is trained with K=2048, it cannot be
+used with a different K, hence I should train another VQVAE just for this test,
+which I don't  think I will do. 
+
+TODO @1002: the solution is rather simple, just fake the data with a smaller
+K, create the mixture and see if the sparse matrix computed in the train_sums
+is equal to the dense matrix.
 """
 
-from pathlib import Path
-from lass_audio.lass.train_sums_graphical_model import estimate_distribution
-from lass_audio.lass.train_sums_graphical_model_dense import estimate_distribution as estimate_distribution_dense
+from tqdm import tqdm
+from lass_audio.jukebox.hparams import setup_hparams
+from lass_audio.lass.train_sums_graphical_model import split_datapoints_by_step, get_mixtures
+from typing import Union, List
 import torch
 import sparse
-from diba.diba.sparse_utils import convert_sparse_coo_to_torch_coo, sparse_normalize
-from diba.diba.utils import normalize_logits
 from diba.tests.utils import test
+import numpy as np
+import hashlib
 
-audio_root = Path(__file__).parent.parent.parent
-device = torch.device("cpu")
+NUM_SOURCES = 3
 
-def load_sums(sums_path: Path):
+def mock_compute_latent(x: torch.Tensor, k: int, flatten: bool = True):
+    # Ensure x is 2D (batch_size, ...), where each row is a different sample
+    batch_size = x.shape[0]
+    # Initialize an empty tensor to store the latents for each sample in the batch
+    latents = torch.empty((batch_size, k), dtype=torch.int64)
+    for i in range(batch_size):
+        # Hash the individual sample from the batch to create a unique seed
+        x_hash = hashlib.sha256(x[i].numpy().tobytes()).hexdigest()
+        seed = int(x_hash, 16) % (2**32)  # Convert hash to a seed value
+        # Set the seed for deterministic behavior
+        torch.manual_seed(seed)
+        # Generate a tensor of k integers from 0 to k-1 for this sample
+        latents[i] = torch.randint(0, k, (k,))
+    torch.manual_seed(42)
+    if flatten:
+        latents = latents.flatten().tolist()
+    return latents
+
+def compute_sparse_sums(k: int, num_sources: int, iterations: int):
     """
-    Loads and normalizes the sparse tensor given at the `sums_path` location.
+    Compute the sparsesums of using num_sources arrays of length k.
     """
-    sums_coo: sparse.COO = sparse.load_npz(sums_path)
-    sums = convert_sparse_coo_to_torch_coo(sums_coo, device)
-    sums = sparse_normalize(sums, dim=-1)
-    return sums
+    prefix_s, prefix_i, prefix_j, prefix_k, prefix_data = [], [], [], [], []
+    buffer_adds: List[List[int]] = [[] for _ in range(NUM_SOURCES)]
+    buffer_sums: List[List[int]] = [[] for _ in range(NUM_SOURCES-1)]
+    batch_size = 8 
+    device = torch.device("cpu")
+    x = torch.randn((batch_size, 524288, 1))
+    xs = split_datapoints_by_step(x, batch_size, step=NUM_SOURCES, device=device)
+    assert xs.shape == (num_sources, batch_size // num_sources, 524288, 1), f"xs wrong shape: {xs.shape}"
+    mixtures = get_mixtures(datapoints=xs, device=device)
+    assert mixtures.shape == (NUM_SOURCES-1, 2, 524288, 1), f"mixtures wrong shape: {mixtures.shape}"
+    for i, x_i in enumerate(xs):
+        latent = mock_compute_latent(x_i, k)
+        assert len(latent) == ((batch_size // NUM_SOURCES) * k), f"x_i latent wrong shape: {torch.tensor(latent).shape}"
+        buffer_adds[i].extend(latent)
+    for i, m_i in enumerate(mixtures):
+        latent = mock_compute_latent(m_i, k)
+        assert len(latent) == ((batch_size // NUM_SOURCES) * k), f"m_i latent wrong shape: {torch.tensor(latent).shape}"
+        buffer_sums[i].extend(latent)
+    coords = []
+    data = []
+    for _ in tqdm(range(iterations), desc="Computing sparse sums"):
+        for i in range(NUM_SOURCES-1):
+            if i == 0:
+                coords = [
+                        prefix_s + [i] * len(buffer_adds[0]) * 2,
+                        prefix_i + buffer_adds[i] + buffer_adds[i+1],
+                        prefix_j + buffer_adds[i+1] + buffer_adds[i],
+                        prefix_k + buffer_sums[i] + buffer_sums[i]
+                ]
+                data = prefix_data + [1] * (len(buffer_adds[1]) * 2)
+            else:
+                coords=[
+                    coords[0] + [i] * (len(buffer_adds[0]) + len(buffer_sums[0])),
+                    coords[1] + buffer_sums[i-1] + buffer_adds[i+1],
+                    coords[2] + buffer_adds[i+1] + buffer_sums[i-1],
+                    coords[3] + buffer_sums[i] + buffer_sums[i],
+                ]
+                data += [1] * (len(buffer_adds[1]) * 2)
 
+        sum_dist = sparse.COO(
+            coords=coords,
+            data=data,
+            shape=[NUM_SOURCES-1, k, k, k],
+        )
+        prefix_s, prefix_i, prefix_j, prefix_k = sum_dist.coords.tolist()
+        prefix_data = sum_dist.data.tolist()
+        buffer_adds: List[List[int]] = [[] for _ in range(NUM_SOURCES)]
+        buffer_sums: List[List[int]] = [[] for _ in range(NUM_SOURCES-1)]
+    
+    return sum_dist
 
-def compute_sparse_sums(k: int = 128):
+def compute_dense_sums(k: int, num_sources: int, iterations: int):
     """
-    Compute the sparse sums using a given k and an audio directory.
+    Compute the dense sums of using num_sources arrays of length k.
     """
-    ROOT_DIRECTORY = Path(__file__).parent.parent.parent
-    vqvae_path = str(ROOT_DIRECTORY / "checkpoints/vqvae.pth.tar")
-    audio_files_dir = str(ROOT_DIRECTORY / "data/train")
-    sr = 44100
-    sl = 11.88862
+    prefix_s, prefix_i, prefix_j, prefix_k, prefix_data = [], [], [], [], []
+    buffer_adds: List[List[int]] = [[] for _ in range(NUM_SOURCES)]
+    buffer_sums: List[List[int]] = [[] for _ in range(NUM_SOURCES-1)]
+    batch_size = 8 
+    device = torch.device("cpu")
+    x = torch.randn((batch_size, 524288, 1))
+    xs = split_datapoints_by_step(x, batch_size, step=NUM_SOURCES, device=device)
+    assert xs.shape == (num_sources, batch_size // num_sources, 524288, 1), f"xs wrong shape: {xs.shape}"
+    mixtures = get_mixtures(datapoints=xs, device=device)
+    assert mixtures.shape == (NUM_SOURCES-1, 2, 524288, 1), f"mixtures wrong shape: {mixtures.shape}"
+    for i, x_i in enumerate(xs):
+        latent = mock_compute_latent(x_i, k, flatten=True)
+        assert len(latent) == ((batch_size // NUM_SOURCES) * k), f"x_i latent wrong shape: {torch.tensor(latent).shape}"
+        buffer_adds[i].append(latent)
+    for i, m_i in enumerate(mixtures):
+        latent = mock_compute_latent(m_i, k, flatten=True)
+        assert len(latent) == ((batch_size // NUM_SOURCES) *k), f"m_i latent wrong shape: {torch.tensor(latent).shape}"
+        buffer_sums[i].append(latent)
+    sums_dist = torch.full((NUM_SOURCES-1, k, k, k), fill_value=0)
+    for _ in tqdm(range(iterations), desc="Computing dense sums"):
+        for i in range(NUM_SOURCES-1):
+            if i == 0:
+                sums_dist[i, buffer_sums[i], buffer_adds[i], buffer_adds[i+1]] += 1
+            else:
+                sums_dist[i, buffer_sums[i], buffer_sums[i-1], buffer_adds[i+1]] += 1
+    return sums_dist
 
-    output_dir = str(ROOT_DIRECTORY / "logs/vqvae_sum_distribution_gm")
-    alpha = (0.5, 0.5)
-    batch_size = 8
-    save_iters = 500
-    checkpoint_path=None
-    vqvae_level=2
-
-
-    hps = setup_hparams(
-            "vqvae",
-            dict(
-                l_bins=k,
-                sr=sr,
-                restore_vqvae=vqvae_path,
-                sample_length=int(sl * sr),
-                audio_files_dir=audio_files_dir,
-                min_duration=sl + 0.01,  # add a small epsilon
-                labels=False,
-                aug_shift=True,
-                aug_blend=True,
-                ),
-            )
-    sums = estimate_distribution(hps=hps,
-                                 output_dir=output_dir,
-                                 epochs=1,
-                                 batch_size=batch_size,
-                                 alpha=alpha,
-                                 save_iters=save_iters,
-                                 vqvae_level=vqvae_level,
-                                 checkpoint_path=checkpoint_path)
-    return sums
-
-def compute_dense_sums(k: int, audio_dir: Path | str):
-    """
-    Compute the dens sums using a given k and an audio directory.
-    """
-    pass
-
-
-
-@test
 def test_sums():
     """
     Actually performs the test.
     """
-    K = 256
-    small_audio_dir = Path("")
-    pass
+    K = 8
+    NUM_SOURCES = 3
+    ITERATIONS = 10_000
+    sparse_sums = compute_sparse_sums(k=K, num_sources=NUM_SOURCES, iterations=ITERATIONS)
+    dense_sums = compute_dense_sums(k=K, num_sources=NUM_SOURCES, iterations=ITERATIONS)
+    
+    assert dense_sums == sparse_sums.todense(), f"""
+    Sparse sums: {sparse_sums.todense()}
+    Dense sums: {dense_sums}
+    """
 
 
 
 if __name__ == "__main__":
+    torch.manual_seed(42)
     test_sums()

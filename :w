@@ -1,0 +1,90 @@
+"""
+This file tests the correctness of the
+`lass_audio/lass/train_sums_graphical_model.py` sums computation. Since sparse
+tensors operations are not trivial and can lead to errors, the idea is to
+compute a smaller sums using a smaller dataset and a smaller K and compare it
+to its dense tensor counterpart. If they are equal, then the tensor in the
+sparse domain is computer correctly. This cannot be done for the real larger K,
+since the memory requirement is too large.
+
+TODO: there is a problem, since the VQVAE is trained with K=2048, it cannot be
+used with a different K, hence I should train another VQVAE just for this test,
+which I don't  think I will do. 
+
+TODO @1002: the solution is rather simple, just fake the data with a smaller
+K, create the mixture and see if the sparse matrix computed in the train_sums
+is equal to the dense matrix.
+"""
+
+from lass_audio.jukebox.hparams import setup_hparams
+from lass_audio.lass.train_sums_graphical_model import split_datapoints_by_step, get_mixtures
+from typing import Union, List
+import torch
+import sparse
+from diba.tests.utils import test
+import hashlib
+
+NUM_SOURCES = 3
+
+
+def mock_compute_latent(x: torch.Tensor, k: int):
+    # Hash the input tensor `x` to create a unique seed
+    x_hash = hashlib.sha256(x.numpy().tobytes()).hexdigest()
+    seed = int(x_hash, 16) % (2**32)  # Convert hash to a seed value
+    # Set the seed for deterministic behavior
+    torch.manual_seed(seed)
+    # Generate a tensor of k integers from 0 to k-1
+    latent_tensor = torch.randint(0, k, (k,))
+    return latent_tensor
+
+def compute_sparse_sums(k: int, num_sources: int):
+    """
+    Compute the sparsesums of using num_sources arrays of length k.
+    """
+    prefix_s, prefix_i, prefix_j, prefix_k, prefix_data = [], [], [], [], []
+    buffer_adds: List[List[int]] = [[] for _ in range(NUM_SOURCES)]
+    buffer_sums: List[List[int]] = [[] for _ in range(NUM_SOURCES-1)]
+    batch_size = 8 
+    device = torch.device("cpu")
+    x = torch.randn((batch_size, 524288, 1))
+    xs = split_datapoints_by_step(x, batch_size, step=NUM_SOURCES, device=device)
+    assert xs.shape == (num_sources, batch_size // num_sources, 524288, 1)
+    mixtures = get_mixtures(datapoints=xs, device=device)
+    assert mixtures.shape == (NUM_SOURCES-1, 2, 524288, 1) #NOTE: don't know where the 2 comes from
+    for i, x_i in enumerate(xs):
+        latent = mock_compute_latent(x_i, k)
+        assert latent.shape == (k * 4)
+        buffer_adds[i].extend(latent)
+    for i, m_i in enumerate(mixtures):
+        latent = mock_compute_latent(m_i, k)
+        assert latent.shape == (k * 4)
+        buffer_sums[i].extend(latent)
+
+    
+
+    pass
+
+def compute_dense_sums(k: int, num_sources: int):
+    """
+    Compute the dense sums of using num_sources arrays of length k.
+    """
+    pass
+
+
+@test
+def test_sums():
+    """
+    Actually performs the test.
+    """
+    K = 256
+    NUM_SOURCES=3
+    sparse_sums = compute_sparse_sums(k=K, num_sources=NUM_SOURCES)
+    dense_sums = compute_dense_sums(k=K, num_sources=NUM_SOURCES)
+    #TODO: Make the assertion here
+    pass
+
+
+
+if __name__ == "__main__":
+    torch.manual_seed(42)
+    test_sums()

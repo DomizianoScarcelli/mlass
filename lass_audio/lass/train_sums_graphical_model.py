@@ -130,18 +130,23 @@ def estimate_distribution(
     with torch.no_grad():
         for epoch in range(epochs):
             for batch_idx, batch in enumerate(tqdm(dataset_loader, desc=f"Epoch: {epoch}/{epochs} | Separating audio...")):
+                # x shape is torch.Size([batch_size, 524288, 1]
                 x = audio_preprocess(batch, hps=hps)
-
                 # get tracks from batch
+                # xs shape is torch.Size([num_sources, batch_size // num_sources, 524288, 1]
                 xs = split_datapoints_by_step(x, batch_size, step=NUM_SOURCES, device=device)
                 assert xs.shape[0] == NUM_SOURCES
+
+                # mixtures shape is torch.Size([2, 2, 524288, 1]
                 mixtures = get_mixtures(datapoints=xs, device=device)
                 assert mixtures.shape[0] == NUM_SOURCES-1 
-
+                
                 # compute latent vectors
                 for i, x_i in enumerate(xs):
+                    # compute_latent(x_i) shape is torch.Size([2048 * 4 = 8192])
                     buffer_adds[i].extend(compute_latent(x_i, vqvae, vqvae_level))
                 for i, m_i in enumerate(mixtures):
+                    # compute_latent(m_i) shape is torch.Size([2048 * 4 = 8192])
                     buffer_sums[i].extend(compute_latent(m_i, vqvae, vqvae_level))
 
                 # save output
@@ -155,11 +160,7 @@ def estimate_distribution(
                     data = []
                     for i in range(NUM_SOURCES-1):
                         #TODO: @1001 - understand if the computation of the
-                        #coordinates is correct. To test this you can create a
-                        #test function that replicates this piece of code for a
-                        #smaller K and a smaller audio, and compare it to the
-                        #equivalent dense tensor computation, which is known to
-                        #be accurate because of the MNIST counterpart
+                        #coordinates is correct. The test file is in `tests/sums_test.py`
 
                         if i == 0:
                             coords = [
@@ -223,7 +224,7 @@ if __name__ == "__main__":
         "--audio-files-dir",
         type=str,
         help="Directory containing the audio files",
-        default=str(ROOT_DIRECTORY / "data/train"),
+        default=str(ROOT_DIRECTORY / "data/train")
     )
     parser.add_argument(
         "--output-dir",

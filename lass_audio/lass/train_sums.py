@@ -113,16 +113,22 @@ def estimate_distribution(
     with torch.no_grad():
         for epoch in range(epochs):
             for batch_idx, batch in enumerate(tqdm(dataset_loader, desc=f"Epoch: {epoch}/{epochs} | Separating audio...")):
+                # x shape is:  torch.Size([batch_size (8), 524288, 1]
                 x = audio_preprocess(batch, hps=hps)
 
                 # get tracks from batch
+                # x_1 shape is:  torch.Size([batch_size // 2 (4), 524288, 1]
                 x_1 = x[: batch_size // 2].to(device)
+                # x_2 shape is:  torch.Size([4, 524288, 1]
                 x_2 = x[batch_size // 2:].to(device)
+                # x_sum shape is:  torch.Size([4, 524288, 1]
                 x_sum = alpha[0] * x_1 + alpha[1] * x_2
 
-                # compute latent vectors
+                # compute_latent x_1 shape is:  torch.Size([batch_size (8) * 2048 = 16384]
                 buffer_add_1.extend(compute_latent(x_1, vqvae, vqvae_level))
+                # compute_latent x_2 shape is:  torch.Size([16384]
                 buffer_add_2.extend(compute_latent(x_2, vqvae, vqvae_level))
+                # compute_latent x_sum shape is:  torch.Size([16384]
                 buffer_sum.extend(compute_latent(x_sum, vqvae, vqvae_level))
 
                 # save output
@@ -137,7 +143,6 @@ def estimate_distribution(
                     print(f"Coords len: ", len(coords))
                     print(f"Coords elements len: ", [len(elem) for elem in coords])
                     print(f"Data len: ", len(data))
-                    raise ValueError()
                     sum_dist = sparse.COO(
                         coords=coords,
                         data=data,
