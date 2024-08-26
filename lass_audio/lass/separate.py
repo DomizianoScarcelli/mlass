@@ -194,8 +194,8 @@ def save_separation(
 
 
 def main(
-    audio_dir_1: str = audio_root / "data/bass",
-    audio_dir_2: str = audio_root / "data/drums",
+    audio_dir_1: str = audio_root / "data/test/bass",
+    audio_dir_2: str = audio_root / "data/test/drums",
     vqvae_path: str = audio_root / "checkpoints/vqvae.pth.tar",
     prior_1_path: str = audio_root / "checkpoints/prior_bass_44100.pth.tar",
     prior_2_path: str = audio_root / "checkpoints/prior_drums_44100.pth.tar",

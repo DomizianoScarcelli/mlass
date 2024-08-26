@@ -113,13 +113,17 @@ def sparse_normalize_old(t: torch.Tensor, dim:int) -> torch.Tensor:
     return result
 
 
-def sparse_normalize(t: sparse.COO, dim) -> torch.Tensor:
+def sparse_normalize(x: torch.Tensor, dim) -> torch.Tensor:
     #NOTE: this doesn't work on M1 macos because of numba + sparse
+    x = x.coalesce()
+    t = sparse.COO(
+        x.indices(), x.values(), shape=x.shape)
     integrals = t.sum(axis=[dim], keepdims=True)
     integrals = sparse.COO(
         integrals.coords, integrals.data, shape=integrals.shape, fill_value=1
     )
-    return t / integrals
+    result = t / integrals
+    return torch.sparse_coo_tensor(result.coords, result.data, size=result.shape)
 
 if __name__ == "__main__":
     pass

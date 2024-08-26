@@ -240,13 +240,13 @@ def save_separation(
 
 
 def main(
-    audio_dir_1: Path = audio_root / "data/bass",
-    audio_dir_2: Path = audio_root / "data/drums",
+    audio_dir_1: Path = audio_root / "data/test/bass",
+    audio_dir_2: Path = audio_root / "data/test/drums",
     vqvae_path: Path = audio_root / "checkpoints/vqvae.pth.tar",
     prior_1_path: Path = audio_root / "checkpoints/prior_bass_44100.pth.tar",
     prior_2_path: Path = audio_root / "checkpoints/prior_drums_44100.pth.tar",
     # sum_frequencies_path: Path = audio_root / "checkpoints/sum_frequencies.npz",
-    sum_frequencies_path: Path = audio_root / "checkpoints/sum_dist_17500.npz",
+    sum_frequencies_path: Path = audio_root / "checkpoints/sum_dist_43500.npz",
     vqvae_type: str = "vqvae",
     prior_1_type: str = "small_prior",
     prior_2_type: str = "small_prior",
