@@ -2,7 +2,6 @@ import argparse
 import re
 from pathlib import Path 
 from typing import Sequence, Tuple, Union, List
-
 import numpy as np
 import sparse
 import torch
@@ -84,7 +83,8 @@ def estimate_distribution(
         alpha: Convex coefficients for the mixture
         save_iters: Number of iterations before storing of estiamtion checkpoint
         checkpoint_path: Path used for resuming estimation
-
+    
+    NOTE: The correctness is tested in ./tests/sums_test.py
     """
 
     def compute_latent(x: torch.Tensor, vqvae: VQVAE, level: int) -> Sequence[int]:
@@ -159,9 +159,6 @@ def estimate_distribution(
                     coords = []
                     data = []
                     for i in range(NUM_SOURCES-1):
-                        #TODO: @1001 - understand if the computation of the
-                        #coordinates is correct. The test file is in `tests/sums_test.py`
-
                         if i == 0:
                             coords = [
                                     prefix_s + [i] * len(buffer_adds[0]) * 2,
@@ -170,9 +167,6 @@ def estimate_distribution(
                                     prefix_k + buffer_sums[i] + buffer_sums[i]
                             ]
                             data = prefix_data + [1] * (len(buffer_adds[1]) * 2)
-                            print(f"i: {i} | Coords len: ", len(coords))
-                            print(f"i: {i} | Coords elements len: ", [len(elem) for elem in coords])
-                            print(f"i: {i} | Data len: ", len(data))
                         else:
                             coords=[
                                 coords[0] + [i] * (len(buffer_adds[0]) + len(buffer_sums[0])),
@@ -181,10 +175,6 @@ def estimate_distribution(
                                 coords[3] + buffer_sums[i] + buffer_sums[i],
                             ]
                             data += [1] * (len(buffer_adds[1]) * 2)
-                            print(f"i: {i} | Coords len: ", len(coords))
-                            print(f"i: {i} | Coords elements len: ", [len(elem) for elem in coords])
-                            print(f"i: {i} | Data len: ", len(data))
-
                     sum_dist = sparse.COO(
                         coords=coords,
                         data=data,

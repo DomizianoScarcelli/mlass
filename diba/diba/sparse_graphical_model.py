@@ -45,9 +45,10 @@ class SparseDirectedGraphicalModel:
             sums = sums.unsqueeze(0)
         sums = sparse_permute(sums, (0,3,1,2))
         print("Sums after permute", sums)
-        sums = sparse_normalize(sums, dim=1)
-        self.p_mmzs = sums
-        print("Sums after normalization", sums)
+        n_sums = sparse_normalize(sums, dim=1)
+        #Indices of n_sums and sums are equal :)
+        self.p_mmzs = n_sums
+        print("Sums after normalization", n_sums)
         self.pm = 0 
 
            
@@ -61,7 +62,6 @@ class SparseDirectedGraphicalModel:
             log_prior = normalize_logits(log_prior) - self.pm
             self.past_key[i] = past_key
             self.p_zs[i] = log_prior
-                
         return self.priors
     
     @timeit

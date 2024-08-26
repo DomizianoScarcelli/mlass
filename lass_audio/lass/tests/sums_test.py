@@ -82,8 +82,6 @@ def compute_sparse_sums(x: torch.Tensor, k: int, num_sources: int, iterations: i
         )
         prefix_s, prefix_i, prefix_j, prefix_k = sum_dist.coords.tolist()
         prefix_data = sum_dist.data.tolist()
-        buffer_adds: List[List[int]] = [[] for _ in range(NUM_SOURCES)]
-        buffer_sums: List[List[int]] = [[] for _ in range(NUM_SOURCES-1)]
     
     return sum_dist
 
@@ -136,7 +134,7 @@ def test_sums():
     """
     K = 12
     NUM_SOURCES = 3
-    ITERATIONS = 1
+    ITERATIONS = 10_000
     batch_size = 8
     x = torch.randn((batch_size, 524288, 1))
     sparse_sums = compute_sparse_sums(x=x, k=K, num_sources=NUM_SOURCES, iterations=ITERATIONS)

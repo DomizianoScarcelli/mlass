@@ -44,7 +44,7 @@ class SparseDirectedGraphicalSeparator(Separator):
                 priors = list(priors.values()),
                 sums=sums,
                 num_tokens=sums.shape[-1],
-                num_sources=3) #TODO: change
+                num_sources=3) 
 
         # lambda x: vqvae.encode(x.unsqueeze(-1), vqvae_level, vqvae_level + 1).view(-1).tolist()
         self.encode_fn = encode_fn
@@ -139,7 +139,7 @@ def main(
     vqvae_path: Path = audio_root / "checkpoints/vqvae.pth.tar",
     prior_paths: List[Path] = [audio_root / "checkpoints/prior_piano_44100.pth.tar",audio_root / "checkpoints/prior_bass_44100.pth.tar", audio_root / "checkpoints/prior_drums_44100.pth.tar"],
     # sum_frequencies_path: Path = audio_root / "checkpoints/sum_frequencies.npz",
-    sum_frequencies_path: Path = audio_root / "checkpoints/sum_dist_8800.npz",
+    sum_frequencies_path: Path = audio_root / "checkpoints/sum_dist_17500.npz",
     vqvae_type: str = "vqvae",
     prior_types: List[str] = ["small_prior", "small_prior", "small_prior"],
     max_sample_tokens: int = 1024,
