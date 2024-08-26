@@ -1,6 +1,9 @@
 from typing import Tuple
 
 import torch
+import os
+import json
+from pathlib import Path
 
 
 def unravel_indices(
@@ -57,3 +60,20 @@ def normalize_logits(x: torch.Tensor, temperature: float = 1.0) -> torch.Tensor:
 
     """
     return torch.distributions.Categorical(logits=x / temperature).logits
+
+
+def compute_sdr(s_ref: torch.Tensor, s_est: torch.Tensor):
+    power_ref = torch.sum(s_ref ** 2)
+    power_error = torch.sum((s_ref - s_est) ** 2)
+    sdr = 10 * torch.log10(power_ref / power_error)
+    return sdr.item()
+
+def save_sdr(sdr:float, path: Path):
+    if not os.path.exists(path):
+        content = {"sdr":[]}
+    else:
+        with open(path, "r") as f:
+            content = json.load(f)
+    content["sdr"].append(sdr)
+    with open(path, "w") as f:
+        json.dump(content, f)
