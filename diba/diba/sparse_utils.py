@@ -89,31 +89,14 @@ def sparse_elementwise_div(t1: torch.Tensor, t2: torch.Tensor) -> torch.Tensor:
     t2_inverted = torch.sparse_coo_tensor(t2.indices(), 1/t2.values(), t2.shape)
     return t1 * t2_inverted
 
-#def sparse_normalize(t: torch.Tensor, dims) -> torch.Tensor:
-#    #TODO: this has to be tested
-#    integral = t
-#    for dim in dims:
-#        integral = torch.sparse.sum(integral, dim=dim).unsqueeze(dim)
-#    expanded_integral = sparse_expand_as(integral, t)
-#    result = sparse_elementwise_div(t, expanded_integral)
-#    return result
-
-
-def sparse_normalize_old(t: torch.Tensor, dim:int) -> torch.Tensor:
-    #NOTE: this is an hybrid dense-sparse normalization, since the totally
-    #sparse normalization is hard to achieve with only torch.sparse.
-
-    indices = t.coalesce().indices()
-    values = t.coalesce().values()
-    shape = t.shape
-    sums = torch.sparse.sum(t, dim=dim).to_dense().unsqueeze(dim)
-    #TODO: this has to be adjusted
-    normalized_values = (values / sums).flatten()
-    result = torch.sparse_coo_tensor(indices, normalized_values, size=shape)
+def sparse_normalize(t: torch.Tensor, dim) -> torch.Tensor:
+    # for dim in dims:
+    integral = torch.sparse.sum(t, dim=dim).unsqueeze(dim)
+    expanded_integral = sparse_expand_as(integral, t)
+    result = sparse_elementwise_div(t, expanded_integral)
     return result
 
-
-def sparse_normalize(x: torch.Tensor, dim) -> torch.Tensor:
+def sparse_normalize_old(x: torch.Tensor, dim) -> torch.Tensor:
     #NOTE: this doesn't work on M1 macos because of numba + sparse
     x = x.coalesce()
     t = sparse.COO(
@@ -127,8 +110,3 @@ def sparse_normalize(x: torch.Tensor, dim) -> torch.Tensor:
 
 if __name__ == "__main__":
     pass
-    # t1 = torch.randn((1,256,1,1)).to_sparse_coo()
-    # t2 = torch.randn((1,256,256,256)).to_sparse_coo()
-    # t1_expanded = sparse_expand(t1, dims=list(t2.shape))
-    # division = sparse_elementwise_div(t2, t1_expanded)
-    # print(t1.shape, t1_expanded.shape, division)

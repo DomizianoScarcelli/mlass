@@ -110,5 +110,5 @@ if __name__ == "__main__":
     # test_sparse_expand_4_high()
     # test_sparse_expand_as()
     # test_sparse_sum()
-    # test_sparse_normalize_rank_3()
+    test_sparse_normalize_rank_3()
     test_sparse_normalize_rank_4()

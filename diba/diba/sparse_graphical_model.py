@@ -41,6 +41,8 @@ class SparseDirectedGraphicalModel:
         self.num_beams = 10
         self.device = sums.device
         self.topk = topk
+
+        print(f"Using device: {self.device}")
         
         # Take the log
         if len(sums.shape) == 3:
@@ -56,7 +58,7 @@ class SparseDirectedGraphicalModel:
            
     @timeit 
     def compute_priors(self, past) -> List[SeparationPrior]:
-        self.p_zs = torch.empty((self.num_sources, self.num_beams, self.K))
+        self.p_zs = torch.empty((self.num_sources, self.num_beams, self.K)).to(self.device)
         for i in range(self.num_sources):
             log_prior, past_key = self.priors[i]._get_logits(
                     past[i],
@@ -108,13 +110,13 @@ class SparseDirectedGraphicalModel:
             return prior + torch.logsumexp(self.forward_results[i-1] + self.backward_results[i], dim=0)
     
     @timeit
-    def single_sample(self, marginals: torch.Tensor, topk: Union[bool, int]=False) -> torch.Tensor:
+    def single_sample(self, marginals: torch.Tensor, topk: Optional[int]=None) -> torch.Tensor:
         if topk:
-            topk_values, topk_indices = torch.topk(marginals, k=topk, dim=-1)
-            m = torch.full_like(marginals, fill_value=math.log(1e-12))
+            _, topk_indices = torch.topk(marginals, k=topk, dim=-1)
+            m = torch.full_like(marginals, fill_value=math.log(1e-12)).to(self.device)
             m[:, :,topk_indices] = marginals[:, :,topk_indices]
             marginals = m
-        sample = torch.distributions.Categorical(logits=marginals).sample()
+        sample = torch.distributions.Categorical(logits=marginals).sample().to(self.device)
         return sample
 
     def single_separate(self, mixture: torch.Tensor, i: int) -> torch.Tensor:
@@ -141,7 +143,7 @@ class SparseDirectedGraphicalModel:
 
         marginals = torch.stack(self.marginal_results)
         # marginals = self.one_shot(mixture[i])
-
+        
         result = self.single_sample(marginals, topk=self.topk)
         return result
 
