@@ -84,7 +84,7 @@ class SparseLikelihood(Likelihood):
 
     def _normalize_matrix(self, sum_dist_path: str):
         sum_dist = sparse.load_npz(str(sum_dist_path))
-        #TODO: accessing the matrix generates a bus error, I might need to generate the matrix from scratch
+        #TODO: using the sparse library on macos generates a bus error
         integrals = sum_dist.sum(axis=-1, keepdims=True)
         I, J, _ = integrals.coords
         integrals = sparse.COO(

@@ -39,7 +39,7 @@ def test_sparse_expand_4():
 @test
 def test_sparse_expand_4_high():
     K = 2048
-    t = torch.randn((1,K,1,K))
+    t = torch.randn((1,K,K,K))
     t_sparse = t.to_sparse_coo()
     assert(sparse_expand(t_sparse, (K,K,K,K)))
                                                                                                            

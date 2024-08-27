@@ -38,7 +38,7 @@ class SparseDirectedGraphicalModel:
         self.num_sources = num_sources
         self.priors = priors
         self.past_key = [None for _ in range(num_sources)]
-        self.num_beams = 10
+        self.num_beams = 25
         self.device = sums.device
         self.topk = topk
 
@@ -48,11 +48,9 @@ class SparseDirectedGraphicalModel:
         if len(sums.shape) == 3:
             sums = sums.unsqueeze(0)
         sums = sparse_permute(sums, (0,3,1,2))
-        print("Sums after permute", sums)
-        n_sums = sparse_normalize(sums, dim=1)
+        # sums = sparse_normalize(sums, dim=1)
         #Indices of n_sums and sums are equal :)
-        self.p_mmzs = n_sums
-        print("Sums after normalization", n_sums)
+        self.p_mmzs = sums
         self.pm = 0 
 
            

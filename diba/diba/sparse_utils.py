@@ -48,37 +48,12 @@ def convert_torch_coo_to_sparse_coo(torch_coo: torch.Tensor) -> sparse.COO:
     return sparse_coo
 
 
-def sparse_expand(t, dims):
-    t = t.coalesce()
-    original_indices = t.indices()
-    original_values = t.values()
-    original_shape = t.shape
-
-    # Calculate the number of repeats needed for each dimension
-    repeats = [dims[dim] // original_shape[dim] for dim in range(len(dims))]
-
-    # Generate new indices for the expanded tensor
-    mesh_grids = torch.meshgrid(*[torch.arange(repeats[dim]) for dim in range(len(repeats))], indexing='ij')
-    mesh_grids = [grid.flatten() for grid in mesh_grids]
-
-    expanded_indices_list = []
-    for dim in range(len(dims)):
-        new_indices_dim = mesh_grids[dim].repeat_interleave(original_indices.size(1))
-        expanded_indices_list.append(new_indices_dim)
-
-    expanded_indices = torch.stack(expanded_indices_list, dim=0)
+def sparse_expand(t1, dims):
+    coo = sparse.COO(t1.indices(), t1.values(), t1.shape)
+    coo = coo.broadcast_to(dims)
+    return torch.sparse_coo_tensor(coo.coords, coo.data, coo.shape)
+   
     
-    # Repeat the original indices and values to match the new shape
-    expanded_original_indices = original_indices.repeat(1, torch.prod(torch.tensor(repeats)).item())
-    expanded_indices = expanded_indices + expanded_original_indices
-
-    expanded_values = original_values.repeat(torch.prod(torch.tensor(repeats)).item())
-
-    # Create the new sparse tensor with the expanded indices and values
-    expanded_sparse_tensor = torch.sparse_coo_tensor(expanded_indices, expanded_values, torch.Size(dims))
-
-    return expanded_sparse_tensor
-
 def sparse_expand_as(t1: torch.Tensor, t2:torch.Tensor) -> torch.Tensor:
     return sparse_expand(t1, dims=list(t2.shape))
 
@@ -96,7 +71,7 @@ def sparse_normalize(t: torch.Tensor, dim) -> torch.Tensor:
     result = sparse_elementwise_div(t, expanded_integral)
     return result
 
-def sparse_normalize_old(x: torch.Tensor, dim) -> torch.Tensor:
+def sparse_normalize_numba(x: torch.Tensor, dim) -> torch.Tensor:
     #NOTE: this doesn't work on M1 macos because of numba + sparse
     x = x.coalesce()
     t = sparse.COO(
