@@ -32,13 +32,15 @@ class SparseDirectedGraphicalModel:
                  priors: List[SeparationPrior],
                  sums: torch.Tensor,
                  num_tokens: int,
-                 num_sources: int):
+                 num_sources: int,
+                 topk: Optional[int] = None):
         self.K = num_tokens #possible discrete values in the latent codes
         self.num_sources = num_sources
         self.priors = priors
         self.past_key = [None for _ in range(num_sources)]
         self.num_beams = 10
         self.device = sums.device
+        self.topk = topk
         
         # Take the log
         if len(sums.shape) == 3:
@@ -140,7 +142,7 @@ class SparseDirectedGraphicalModel:
         marginals = torch.stack(self.marginal_results)
         # marginals = self.one_shot(mixture[i])
 
-        result = self.single_sample(marginals, topk=64)
+        result = self.single_sample(marginals, topk=self.topk)
         return result
 
     # def one_shot(self, token: torch.Tensor) -> torch.Tensor:

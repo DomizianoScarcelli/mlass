@@ -3,15 +3,10 @@ import functools
 from pathlib import Path
 from typing import Callable, List, Mapping, Optional
 
-import json
-import os
-from diba.diba import fast_beamsearch_separation, fast_sampled_separation
 import sparse
-import numpy as np
 import torch
 import torchaudio
 import tqdm
-from diba.diba import Likelihood
 from torch.utils.data import DataLoader
 from diba.diba.interfaces import SeparationPrior
 from diba.diba.sparse_graphical_model import SparseDirectedGraphicalModel
@@ -37,45 +32,6 @@ class Separator(torch.nn.Module, abc.ABC):
         ...
 
 
-class BeamsearchSeparator(Separator):
-    def __init__(
-        self,
-        encode_fn: Callable,
-        decode_fn: Callable,
-        priors: Mapping[str, SeparationPrior],
-        likelihood: Likelihood,
-        num_beams: int,
-    ):
-        print("inside BeamsearchSeparator init method")
-        super().__init__()
-        self.likelihood = likelihood
-        self.source_types = list(priors)
-        self.priors = list(priors.values())
-        self.num_beams = num_beams
-
-        # lambda x: vqvae.encode(x.unsqueeze(-1), vqvae_level, vqvae_level + 1).view(-1).tolist()
-        self.encode_fn = encode_fn
-        # lambda x: decode_latent_codes(vqvae, x.squeeze(0), level=vqvae_level)
-        self.decode_fn = decode_fn
-
-    @torch.no_grad()
-    def separate(self, mixture: torch.Tensor) -> Mapping[str, torch.Tensor]:
-        # convert signal to codes
-
-        print("The mixture code shape when beam separating is: ", mixture.shape)
-        mixture_codes = self.encode_fn(mixture)
-
-        # separate mixture (x has shape [2, num. tokens])
-        x = fast_beamsearch_separation(
-            priors=self.priors,
-            likelihood=self.likelihood,
-            mixture=mixture_codes,
-            num_beams=self.num_beams,
-        )
-
-        # decode results
-        return {source: self.decode_fn(xi) for source, xi in zip(self.source_types, x)}
-
 class SparseDirectedGraphicalSeparator(Separator):
     def __init__(
             self,
@@ -92,7 +48,8 @@ class SparseDirectedGraphicalSeparator(Separator):
                 priors = list(priors.values()),
                 sums=sums,
                 num_tokens=sums.shape[-1],
-                num_sources=2)
+                num_sources=2,
+                topk=topk)
 
         # lambda x: vqvae.encode(x.unsqueeze(-1), vqvae_level, vqvae_level + 1).view(-1).tolist()
         self.encode_fn = encode_fn
@@ -110,60 +67,6 @@ class SparseDirectedGraphicalSeparator(Separator):
 
         # decode results
         return {source: self.decode_fn(xi.view(-1)) for source, xi in zip(self.source_types, x)}
-
-
-
-class TopkSeparator(Separator):
-    def __init__(
-        self,
-        encode_fn: Callable,
-        decode_fn: Callable,
-        priors: Mapping[str, SeparationPrior],
-        likelihood: Likelihood,
-        num_samples: int,
-        temperature: float = 1.0,
-        top_k: int = None,
-    ):
-        super().__init__()
-        self.likelihood = likelihood
-        self.source_types = list(priors)
-        self.priors = list(priors.values())
-        self.num_samples = num_samples
-        self.temperature = temperature
-        self.top_k = top_k
-
-        self.encode_fn = encode_fn
-        self.decode_fn = decode_fn
-
-    def separate(self, mixture: torch.Tensor):
-        mixture_codes = self.encode_fn(mixture)
-
-        x_0, x_1 = fast_sampled_separation(
-            priors=self.priors,
-            likelihood=Likelihood,
-            mixture=mixture_codes,
-            num_samples=self.num_samples,
-            temperature=self.temperature,
-            top_k=self.top_k,
-        )
-
-        # decode results
-        dec_bs = 32
-        num_batches = int(np.ceil(self.num_samples / dec_bs))
-        res_0, res_1 = [None]*num_batches, [None]*num_batches
-
-        for i in range(num_batches):
-            res_0[i] = self.decode_fn([x_0[i * dec_bs:(i + 1) * dec_bs]])
-            res_1[i] = self.decode_fn([x_1[i * dec_bs:(i + 1) * dec_bs]])
-
-        res_0 = torch.cat(res_0, dim=0)
-        res_1 = torch.cat(res_1, dim=0)
-
-        # select best
-        best_idx = (0.5 * res_0 + 0.5 * res_1 -
-                    mixture.view(1, -1)).norm(p=2, dim=-1).argmin()
-        return {source: self.decode_fn(xi) for source, xi in zip(self.source_types, [x_0[best_idx], x_1[best_idx]])}
-
 
 # -----------------------------------------------------------------------------
 
@@ -321,6 +224,7 @@ def main(
         priors={k: JukeboxPrior(p.prior, torch.zeros(
             (), dtype=torch.float32, device=device)) for k, p in priors.items()},
         sums=sums,
+        topk=64,
         **kwargs,
     )
     print(f"Separator setup completed")

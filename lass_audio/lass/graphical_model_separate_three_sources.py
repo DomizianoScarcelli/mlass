@@ -35,7 +35,7 @@ class SparseDirectedGraphicalSeparator(Separator):
             decode_fn: Callable,
             priors: Mapping[str, SeparationPrior],
             sums: torch.Tensor,
-            topk: Optional[int] = None #TODO: link this topk to the actual separate topk
+            topk: Optional[int] = None 
             ):
         super().__init__()
         self.source_types = list(priors)
@@ -45,7 +45,8 @@ class SparseDirectedGraphicalSeparator(Separator):
                 priors = list(priors.values()),
                 sums=sums,
                 num_tokens=sums.shape[-1],
-                num_sources=3) 
+                num_sources=3,
+                topk=topk) 
 
         # lambda x: vqvae.encode(x.unsqueeze(-1), vqvae_level, vqvae_level + 1).view(-1).tolist()
         self.encode_fn = encode_fn
@@ -215,6 +216,7 @@ def main(
         priors={k: JukeboxPrior(p.prior, torch.zeros(
             (), dtype=torch.float32, device=device)) for k, p in priors.items()},
         sums=sums,
+        topk=64,
         **kwargs,
     )
     print(f"Separator setup completed")
