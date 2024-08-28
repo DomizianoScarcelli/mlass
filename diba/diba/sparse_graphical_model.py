@@ -38,7 +38,7 @@ class SparseDirectedGraphicalModel:
         self.num_sources = num_sources
         self.priors = priors
         self.past_key = [None for _ in range(num_sources)]
-        self.num_beams = 25
+        self.num_beams = 100
         self.device = sums.device
         self.topk = topk
 
@@ -48,7 +48,7 @@ class SparseDirectedGraphicalModel:
         if len(sums.shape) == 3:
             sums = sums.unsqueeze(0)
         sums = sparse_permute(sums, (0,3,1,2))
-        # sums = sparse_normalize(sums, dim=1)
+        sums = sparse_normalize(sums, dim=1).to(self.device)
         #Indices of n_sums and sums are equal :)
         self.p_mmzs = sums
         self.pm = 0 
@@ -61,8 +61,8 @@ class SparseDirectedGraphicalModel:
             log_prior, past_key = self.priors[i]._get_logits(
                     past[i],
                     self.past_key[i])
-            log_prior = normalize_logits(log_prior) - self.pm
-            self.past_key[i] = past_key
+            log_prior = (normalize_logits(log_prior) - self.pm).to(self.device)
+            self.past_key[i] = past_key.to(self.device) if past_key is not None else past_key
             self.p_zs[i] = log_prior
         return self.priors
     
@@ -156,12 +156,12 @@ class SparseDirectedGraphicalModel:
 
     def separate(self, mixture: torch.Tensor) -> torch.Tensor:
         #NOTE: I'm pretty sure this is correct
-        self.prior_past = torch.full((self.num_sources, self.K, len(mixture)+1), fill_value=-1, dtype=torch.long)
+        self.prior_past = torch.full((self.num_sources, self.K, len(mixture)+1), fill_value=-1, dtype=torch.long).to(self.device)
         self.prior_past[:,:, 0] = 0
         
         for i in tqdm(range(len(mixture)), desc="Separating mixture...", leave=False):
             self.compute_priors(past=self.prior_past[:, :self.num_beams, :i+1])
-            sample = self.single_separate(mixture, i)
+            sample = self.single_separate(mixture, i).to(self.device)
             self.prior_past[:, :self.num_beams, i+1] = sample
         print(self.prior_past)
         return self.prior_past[:,:self.num_beams,1:][:,-1]

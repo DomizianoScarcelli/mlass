@@ -170,7 +170,7 @@ def main(
     #    raise ValueError(f"Path {save_path} already exists!")
 
     # rank, local_rank, device = setup_dist_from_mpi(port=29533, verbose=True)
-    device = torch.device("cpu")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # setup models
     vqvae = setup_vqvae(
@@ -210,7 +210,7 @@ def main(
 
     with open(sum_frequencies_path, "rb") as f:
         sums_coo: sparse.COO = sparse.load_npz(sum_frequencies_path)
-        sums = convert_sparse_coo_to_torch_coo(sums_coo, device)
+        sums = convert_sparse_coo_to_torch_coo(sums_coo, device).to(device)
         print("Sums: ", sums)
 
     # create separator
