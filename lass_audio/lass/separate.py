@@ -18,6 +18,7 @@ from lass_audio.lass.datasets import SeparationSubset
 from lass_audio.lass.diba_interfaces import JukeboxPrior, SparseLikelihood
 from lass_audio.lass.utils import assert_is_audio, decode_latent_codes, get_dataset_subsample, get_raw_to_tokens, setup_priors, setup_vqvae
 from lass_audio.lass.datasets import ChunkedPairsDataset
+from diba.diba.utils import save_sdr, compute_sdr
 
 
 audio_root = Path(__file__).parent.parent
@@ -182,11 +183,14 @@ def save_separation(
     sample_rate: int,
     path: Path,
 ):
+    SDR_PATH = audio_root / "sdr.json"
     assert_is_audio(*original_signals, *separated_signals)
     # assert original_1.shape == original_2.shape == separation_1.shape == separation_2.shape
     assert len(original_signals) == len(separated_signals)
     for i, (ori, sep) in enumerate(zip(original_signals, separated_signals)):
         print(ori.shape, sep.shape)
+        sdr = compute_sdr(ori.cpu(), sep.cpu())
+        save_sdr(sdr=sdr, path=SDR_PATH)
         torchaudio.save(str(path / f"ori{i+1}.wav"),
                         ori.cpu(), sample_rate=sample_rate)
         torchaudio.save(str(path / f"sep{i+1}.wav"),
