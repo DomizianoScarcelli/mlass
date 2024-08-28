@@ -38,7 +38,7 @@ class SparseDirectedGraphicalModel:
         self.num_sources = num_sources
         self.priors = priors
         self.past_key = [None for _ in range(num_sources)]
-        self.num_beams = 100
+        self.num_beams = 50
         self.device = sums.device
         self.topk = topk
 
