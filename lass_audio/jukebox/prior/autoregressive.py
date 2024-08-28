@@ -9,6 +9,8 @@ from lass_audio.jukebox.transformer.transformer import Transformer
 from lass_audio.jukebox.utils.logger import get_range
 from lass_audio.jukebox.utils.torch_utils import empty_cache
 
+device = "cuda" if t.cuda.is_available() else "cpu"
+
 def get_normal(*shape, std=0.01):
     w = t.empty(shape)
     nn.init.normal_(w, std=std)
