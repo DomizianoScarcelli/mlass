@@ -11,17 +11,6 @@ from functools import wraps
 import sparse
 import time
 
-def timeit(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        start_time = time.time()
-        result = func(*args, **kwargs)
-        end_time = time.time()
-        elapsed_time = end_time - start_time
-        # print(f"Function '{func.__name__}' executed in {elapsed_time:.4f} seconds")
-        return result
-    return wrapper
-
 class SparseDirectedGraphicalModel:
     """
     Represents the Bayesian Network with the latent codes z_1,...,z_n and the
@@ -40,7 +29,7 @@ class SparseDirectedGraphicalModel:
         self.past_key = [None for _ in range(num_sources)]
         self.num_beams = 50
         self.device = sums.device
-        self.topk = topk
+        self.topk = self.num_beams
 
         print(f"Using device: {self.device}")
         
@@ -54,7 +43,6 @@ class SparseDirectedGraphicalModel:
         self.pm = 0 
 
            
-    @timeit 
     def compute_priors(self, past) -> List[SeparationPrior]:
         self.p_zs = torch.empty((self.num_sources, self.num_beams, self.K)).to(self.device)
         for i in range(self.num_sources):
@@ -66,37 +54,35 @@ class SparseDirectedGraphicalModel:
             self.p_zs[i] = log_prior
         return self.priors
     
-    @timeit
     def forward_pass(self, i: int, token_idx: torch.Tensor):
         """
         It computes the message μα in the graphical model forward pass.
         """
-        # shape is [256, 256, 256] = [K, K, K]
-        # shape is [2, 256] = [num_sources, K]
-        prior = torch.logsumexp(self.p_zs[i], dim=[0])
+        # B x K -> K
+        prior = torch.logsumexp(self.p_zs[i], dim=0)
+        # 1 x K x K
         sums = torch.log(self.p_mmzs[i, token_idx].unsqueeze(0).to_dense() + 1e-12)
         if i == 0:
-            return torch.logsumexp(prior + sums, dim=1)
+            # 1 x K
+            return torch.logsumexp(sums + prior, dim=1)
         old_message = torch.logsumexp(prior + self.forward_results[i-1], dim=0)
         final_message = torch.logsumexp(old_message + sums, dim=1)
         return final_message
 
-    @timeit
     def backward_pass(self, i: int, token_idx: torch.Tensor):
         """
         It computes the message μβ in the graphical model backward pass.
         """
-        prior = torch.logsumexp(self.p_zs[i+1], dim=[0])
+        prior = torch.logsumexp(self.p_zs[i+1], dim=0)
         sums = torch.log(self.p_mmzs[i, token_idx].unsqueeze(0).to_dense() + 1e-12)
         if i == self.num_sources-2:
-            message =  torch.logsumexp(prior + sums, dim=0)
-            return torch.logsumexp(prior + message, dim=-1)
+            # 1 x K
+            return torch.logsumexp(prior + sums, dim=-1)
         
         old_message = torch.logsumexp(sums + self.backward_results[i+1], dim=0)
         final_message = torch.logsumexp(prior + old_message, dim=0) 
         return final_message
 
-    @timeit 
     def compute_marginals(self, i: int) -> torch.Tensor:
         # prior = torch.logsumexp(self.p_zs[i], dim=-1).unsqueeze(-1)
         prior = self.p_zs[i]
@@ -107,7 +93,6 @@ class SparseDirectedGraphicalModel:
         else:
             return prior + torch.logsumexp(self.forward_results[i-1] + self.backward_results[i], dim=0)
     
-    @timeit
     def single_sample(self, marginals: torch.Tensor, topk: Optional[int]=None) -> torch.Tensor:
         if topk:
             _, topk_indices = torch.topk(marginals, k=topk, dim=-1)
@@ -164,7 +149,9 @@ class SparseDirectedGraphicalModel:
             sample = self.single_separate(mixture, i).to(self.device)
             self.prior_past[:, :self.num_beams, i+1] = sample
         print(self.prior_past)
-        return self.prior_past[:,:self.num_beams,1:][:,-1]
+        # return self.prior_past[:,:self.num_beams,1:][:,-1]
+        return self.prior_past[:,:self.num_beams,1:]
+
 
 
 

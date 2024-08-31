@@ -123,7 +123,7 @@ class ConditionalAutoregressive2D(nn.Module):
             x = self.preprocess(x)
 
         N, D = x.shape
-        assert isinstance(x, t.cuda.LongTensor)
+        # assert isinstance(x, t.cuda.LongTensor)
         assert (0 <= x).all() and (x < self.bins).all()
 
         if self.y_cond:
@@ -187,7 +187,7 @@ class ConditionalAutoregressive2D(nn.Module):
             else:
                 x[:, 0] = self.start_token
         else:
-            assert isinstance(x, t.cuda.LongTensor)
+            # assert isinstance(x, t.cuda.LongTensor)
             assert (0 <= x).all() and (x < self.bins).all()
             x = self.x_emb(x)
         assert x.shape == (n_samples, 1, self.width)
@@ -259,7 +259,7 @@ class ConditionalAutoregressive2D(nn.Module):
         # Preprocess.
         with t.no_grad():
             x = self.preprocess(x)
-        assert isinstance(x, t.cuda.LongTensor)
+        # assert isinstance(x, t.cuda.LongTensor)
         assert (0 <= x).all() and (x < self.bins).all()
         assert x.shape[0] == n_samples
         xs = t.split(x, 1, dim=1)

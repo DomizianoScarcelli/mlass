@@ -15,9 +15,10 @@ from ..modules import VectorQuantizedVAE
 
 from lass_mnist.lass.diba_interaces import UnconditionedTransformerPrior
 from .utils import refine_latents, CONFIG_DIR, ROOT_DIR, CONFIG_STORE
+from diba.diba.sparse_graphical_model import SparseDirectedGraphicalModel
 from diba.diba.graphical_model import DirectedGraphicalModel
 import multiprocessing as mp
-from typing import Sequence
+from typing import Sequence, Union
 from numpy.random import default_rng
 from torch.utils.data import Dataset
 
@@ -89,7 +90,7 @@ def select_closest_to_mixture(
 @torch.no_grad()
 def generate_samples(
     model: VectorQuantizedVAE,
-    graphical_model: DirectedGraphicalModel,
+    graphical_model: Union[SparseDirectedGraphicalModel, DirectedGraphicalModel],
     gts: Tuple[torch.Tensor, torch.Tensor],
     bos: Tuple[int, int],
     latent_length: int,
@@ -229,7 +230,12 @@ def main(cfg):
     with open(p_mmzs_path, "rb") as f:
         # sums = torch.load(f).permute(2,0,1).unsqueeze(0)
         sums = torch.load(f)
-
+    
+    # sums /= (sums + 1e-12).sum(dim=1).unsqueeze(1)
+    # graphical_model = SparseDirectedGraphicalModel(priors=priors,
+    #                                          sums=sums.to_sparse(),
+    #                                          num_sources=NUM_SOURCES,
+    #                                             num_tokens=256)
     graphical_model = DirectedGraphicalModel(priors=priors,
                                              sums=sums,
                                              num_sources=NUM_SOURCES)
@@ -269,7 +275,7 @@ def main(cfg):
             gen1lat,
             gen2lat,
             gtm,
-            n_iterations=500, #TODO: used to remove refine latents, just for debug
+            n_iterations=1, #TODO: used to remove refine latents, just for debug
             learning_rate=1e-1,
         )
 
