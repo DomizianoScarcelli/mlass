@@ -155,8 +155,7 @@ class SparseDirectedGraphicalModel:
 
         #select best
         result = self.prior_past[:, :self.num_beams,1:]
-        best_idx = (torch.mean(result.float(), dim=0) - torch.tensor(mixture).view(1, -1)).norm(p=2, dim=1).argmin()
-        return result[:, best_idx]
+        return result
 
 
 
