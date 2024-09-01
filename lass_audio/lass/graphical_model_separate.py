@@ -3,6 +3,7 @@ import functools
 from pathlib import Path
 from typing import Callable, List, Mapping, Optional
 
+import numpy as np
 import sparse
 import torch
 import torchaudio
@@ -18,7 +19,7 @@ from lass_audio.lass.diba_interfaces import JukeboxPrior, SparseLikelihood
 from lass_audio.lass.utils import assert_is_audio, decode_latent_codes, get_dataset_subsample, get_raw_to_tokens, setup_priors, setup_vqvae
 from lass_audio.lass.datasets import ChunkedPairsDataset
 from diba.diba.utils import save_sdr, compute_sdr
-
+import copy
 
 audio_root = Path(__file__).parent.parent
 
@@ -48,7 +49,6 @@ class SparseDirectedGraphicalSeparator(Separator):
         self.sums = sums
         self.num_tokens=sums.shape[-1]
         self.topk = topk
-        self.priors = priors
         # lambda x: vqvae.encode(x.unsqueeze(-1), vqvae_level, vqvae_level + 1).view(-1).tolist()
         self.encode_fn = encode_fn
         # lambda x: decode_latent_codes(vqvae, x.squeeze(0), level=vqvae_level)
@@ -66,11 +66,31 @@ class SparseDirectedGraphicalSeparator(Separator):
         mixture_codes = self.encode_fn(mixture)
 
         # separate mixture (x has shape [2, num. tokens])
-        x = self.gm.separate(mixture=mixture_codes)
+        x = self.gm.separate(mixture=mixture_codes).to(self.sums.device)
         print(f"x shape: {x.shape}")
-        # decode results
-        del self.gm
-        return {source: self.decode_fn(xi.flatten()) for source, xi in zip(self.source_types, x)}
+
+        # decoded = torch.stack([self.decode_fn(xi.flatten()) for xi in x], dim=0)
+        # best_idx = (torch.mean(decoded.cpu().float(), dim=0).view(self.gm.num_beams,-1) - torch.tensor(mixture).view(1, -1)).norm(p=2, dim=1).argmin()
+        # x = x[:, best_idx]
+        
+        x_0, x_1 = x[0], x[1]
+        dec_bs = 10
+        num_batches = int(np.ceil(self.gm.num_beams / dec_bs))
+        res_0, res_1 = [None]*num_batches, [None]*num_batches
+
+        for i in range(num_batches):
+            res_0[i] = self.decode_fn([x_0[i * dec_bs:(i + 1) * dec_bs]])
+            res_1[i] = self.decode_fn([x_1[i * dec_bs:(i + 1) * dec_bs]])
+
+        res_0 = torch.cat(res_0, dim=0)
+        res_1 = torch.cat(res_1, dim=0)
+
+        # select best
+        best_idx = (0.5 * res_0 + 0.5 * res_1 -
+                    torch.tensor(mixture).view(1, -1)).norm(p=2, dim=-1).argmin()
+        return {source: self.decode_fn(xi.squeeze(0)) for source, xi in zip(self.source_types, [x_0[best_idx], x_1[best_idx]])}
+
+        # return {source: self.decode_fn(xi.flatten()) for source, xi in zip(self.source_types, x)}
 
 # -----------------------------------------------------------------------------
 
@@ -150,8 +170,8 @@ def main(
     vqvae_path: Path = audio_root / "checkpoints/vqvae.pth.tar",
     prior_1_path: Path = audio_root / "checkpoints/prior_bass_44100.pth.tar",
     prior_2_path: Path = audio_root / "checkpoints/prior_drums_44100.pth.tar",
-    # sum_frequencies_path: Path = audio_root / "checkpoints/sum_frequencies.npz",
-    sum_frequencies_path: Path = audio_root / "checkpoints/sum_dist_43500.npz",
+    sum_frequencies_path: Path = audio_root / "checkpoints/sum_frequencies.npz",
+    # sum_frequencies_path: Path = audio_root / "checkpoints/sum_dist_43500.npz",
     vqvae_type: str = "vqvae",
     prior_1_type: str = "small_prior",
     prior_2_type: str = "small_prior",
