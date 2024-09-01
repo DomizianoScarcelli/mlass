@@ -27,7 +27,7 @@ class SparseDirectedGraphicalModel:
         self.num_sources = num_sources
         self.priors = priors
         self.past_key = [None for _ in range(num_sources)]
-        self.num_beams = 5
+        self.num_beams = 3
         self.device = sums.device
         self.topk = self.num_beams
 
@@ -149,8 +149,14 @@ class SparseDirectedGraphicalModel:
             sample = self.single_separate(mixture, i).to(self.device)
             self.prior_past[:, :self.num_beams, i+1] = sample
         print(self.prior_past)
+        # Shape: (N, B, K) -> (N, 1, K)
         # return self.prior_past[:,:self.num_beams,1:][:,-1]
-        return self.prior_past[:,:self.num_beams,1:]
+        # Shape: (N, B, K)
+
+        #select best
+        result = self.prior_past[:, :self.num_beams,1:]
+        best_idx = (torch.mean(result.float(), dim=0) - torch.tensor(mixture).view(1, -1)).norm(p=2, dim=1).argmin()
+        return result[:, best_idx]
 
 
 

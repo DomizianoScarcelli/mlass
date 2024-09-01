@@ -133,8 +133,8 @@ def save_separation(
     assert len(original_signals) == len(separated_signals)
     for i, (ori, sep) in enumerate(zip(original_signals, separated_signals)):
         print(ori.shape, sep.shape)
-        # sdr = compute_sdr(ori.cpu(), sep.cpu())
-        # save_sdr(sdr=sdr, path=SDR_PATH)
+        sdr = compute_sdr(ori.cpu(), sep.cpu())
+        save_sdr(sdr=sdr, path=SDR_PATH)
         torchaudio.save(str(path / f"ori{i+1}.wav"),
                         ori.cpu(), sample_rate=sample_rate)
         torchaudio.save(str(path / f"sep{i+1}.wav"),

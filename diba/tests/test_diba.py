@@ -9,8 +9,9 @@ import torch
 from click.testing import CliRunner
 
 from diba.diba import cli
-from diba.diba import beamsearch_separation
+# from diba.diba import beamsearch_separation
 from diba.diba.interfaces import Likelihood, SeparationPrior
+from diba.tests.utils import test
 
 
 @pytest.fixture
@@ -152,3 +153,16 @@ def test_beamsearch():
             else:
                 assert not r0_eq, f"{r0.tolist()} == {x0.tolist()} (expected different result)"
                 assert not r1_eq, f"{r1.tolist()} == {x1.tolist()} (expected different result)"
+
+@test
+def test_select_best():
+    result = torch.randn(2, 20, 2048)
+    mixture = torch.rand((2048,))
+    best_idx = (torch.mean(result, dim=0) - mixture.view(1, -1)).norm(p=2, dim=1).argmin()
+    best_result = result[:, best_idx]
+    print(best_result)
+    print(best_result.shape)
+
+
+if __name__ == "__main__":
+    test_select_best()
