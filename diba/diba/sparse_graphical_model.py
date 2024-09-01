@@ -7,9 +7,6 @@ from typing import List, Optional, Union
 
 from diba.diba.sparse_utils import convert_torch_coo_to_sparse_coo, sparse_elementwise_div, sparse_expand, sparse_expand_as, sparse_normalize, sparse_permute, convert_sparse_coo_to_torch_coo
 from .utils import normalize_logits
-from functools import wraps
-import sparse
-import time
 
 class SparseDirectedGraphicalModel:
     """
@@ -29,7 +26,7 @@ class SparseDirectedGraphicalModel:
         self.past_key = [None for _ in range(num_sources)]
         self.num_beams = 3
         self.device = sums.device
-        self.topk = self.num_beams
+        self.topk = None
 
         print(f"Using device: {self.device}")
         
@@ -156,7 +153,7 @@ class SparseDirectedGraphicalModel:
         #select best
         result = self.prior_past[:, :self.num_beams,1:]
         print("Result mean shape: ", torch.mean(result.float(), dim=0).shape)
-        best_idx = (torch.mean(result.float(), dim=0).view(self.num_beams,-1) - torch.tensor(mixture).view(1, -1)).norm(p=2, dim=1).argmin()
+        best_idx = (torch.mean(result.float(), dim=0).view(self.num_beams,-1) - torch.tensor(mixture).view(1, -1)).norm(p=2, dim=-1).argmin()
         print("Best_idx: ",best_idx)
         return result[:, best_idx]
 

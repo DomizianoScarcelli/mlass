@@ -44,13 +44,11 @@ class SparseDirectedGraphicalSeparator(Separator):
         super().__init__()
         self.source_types = list(priors)
         self.priors = list(priors.values())
-        self.gm = SparseDirectedGraphicalModel(
-                priors = list(priors.values()),
-                sums=sums,
-                num_tokens=sums.shape[-1],
-                num_sources=2,
-                topk=topk)
-
+        
+        self.sums = sums
+        self.num_tokens=sums.shape[-1]
+        self.topk = topk
+        self.priors = priors
         # lambda x: vqvae.encode(x.unsqueeze(-1), vqvae_level, vqvae_level + 1).view(-1).tolist()
         self.encode_fn = encode_fn
         # lambda x: decode_latent_codes(vqvae, x.squeeze(0), level=vqvae_level)
@@ -59,12 +57,19 @@ class SparseDirectedGraphicalSeparator(Separator):
     @torch.no_grad()
     def separate(self, mixture: torch.Tensor) -> Mapping[str, torch.Tensor]:
         # convert signal to codes
+        self.gm = SparseDirectedGraphicalModel(
+                priors = self.priors,
+                sums=self.sums,
+                num_tokens=self.num_tokens,
+                num_sources=2,
+                topk=self.topk)
         mixture_codes = self.encode_fn(mixture)
 
         # separate mixture (x has shape [2, num. tokens])
         x = self.gm.separate(mixture=mixture_codes)
         print(f"x shape: {x.shape}")
         # decode results
+        del self.gm
         return {source: self.decode_fn(xi.flatten()) for source, xi in zip(self.source_types, x)}
 
 # -----------------------------------------------------------------------------
