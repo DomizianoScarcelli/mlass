@@ -53,42 +53,42 @@ class SparseDirectedGraphicalSeparator(Separator):
         self.encode_fn = encode_fn
         # lambda x: decode_latent_codes(vqvae, x.squeeze(0), level=vqvae_level)
         self.decode_fn = decode_fn
-
-    @torch.no_grad()
-    def separate(self, mixture: torch.Tensor) -> Mapping[str, torch.Tensor]:
-        # convert signal to codes
         self.gm = SparseDirectedGraphicalModel(
                 priors = self.priors,
                 sums=self.sums,
                 num_tokens=self.num_tokens,
                 num_sources=2,
                 topk=self.topk)
+
+    @torch.no_grad()
+    def separate(self, mixture: torch.Tensor) -> Mapping[str, torch.Tensor]:
+        # convert signal to codes
         mixture_codes = self.encode_fn(mixture)
 
         # separate mixture (x has shape [2, num. tokens])
         x = self.gm.separate(mixture=mixture_codes).to(self.sums.device)
         print(f"x shape: {x.shape}")
 
-        # decoded = torch.stack([self.decode_fn(xi.flatten()) for xi in x], dim=0)
-        # best_idx = (torch.mean(decoded.cpu().float(), dim=0).view(self.gm.num_beams,-1) - torch.tensor(mixture).view(1, -1)).norm(p=2, dim=1).argmin()
-        # x = x[:, best_idx]
-        
         x_0, x_1 = x[0], x[1]
-        dec_bs = 10
+        dec_bs = 1
         num_batches = int(np.ceil(self.gm.num_beams / dec_bs))
         res_0, res_1 = [None]*num_batches, [None]*num_batches
 
+        print(x_0.shape, x_1.shape)
+
         for i in range(num_batches):
-            res_0[i] = self.decode_fn([x_0[i * dec_bs:(i + 1) * dec_bs]])
-            res_1[i] = self.decode_fn([x_1[i * dec_bs:(i + 1) * dec_bs]])
+            res_0[i] = self.decode_fn(x_0[i * dec_bs:(i + 1) * dec_bs].flatten())
+            res_1[i] = self.decode_fn(x_1[i * dec_bs:(i + 1) * dec_bs].flatten())
 
-        res_0 = torch.cat(res_0, dim=0)
-        res_1 = torch.cat(res_1, dim=0)
-
+        res_0 = torch.cat(res_0, dim=0).view(self.gm.num_beams, -1)
+        res_1 = torch.cat(res_1, dim=0).view(self.gm.num_beams, -1)
+        
+        print(res_0.shape, res_1.shape)
+        mean = torch.mean(torch.stack([res_0, res_1], dim=0), dim=0).cpu()
+        print(mean.shape)
         # select best
-        best_idx = (0.5 * res_0 + 0.5 * res_1 -
-                    torch.tensor(mixture).view(1, -1)).norm(p=2, dim=-1).argmin()
-        return {source: self.decode_fn(xi.squeeze(0)) for source, xi in zip(self.source_types, [x_0[best_idx], x_1[best_idx]])}
+        best_idx = (mean - torch.tensor(mixture).view(1, -1)).norm(p=2, dim=-1).argmin()
+        return {source: self.decode_fn(xi.flatten()) for source, xi in zip(self.source_types, [x_0[best_idx], x_1[best_idx]])}
 
         # return {source: self.decode_fn(xi.flatten()) for source, xi in zip(self.source_types, x)}
 

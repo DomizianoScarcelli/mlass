@@ -25,7 +25,7 @@ class SparseDirectedGraphicalModel:
         self.num_sources = num_sources
         self.priors = priors
         self.past_key = [None for _ in range(num_sources)]
-        self.num_beams = 50
+        self.num_beams = 2
         self.device = sums.device
         self.topk = None
 
@@ -35,7 +35,7 @@ class SparseDirectedGraphicalModel:
         if len(sums.shape) == 3:
             sums = sums.unsqueeze(0)
         sums = sparse_permute(sums, (0,3,1,2))
-        sums = sparse_normalize(sums, dim=1).to(self.device)
+        # sums = sparse_normalize(sums, dim=1).to(self.device)
         #Indices of n_sums and sums are equal :)
         self.p_mmzs = sums
         self.pm = 0 
@@ -154,8 +154,8 @@ class SparseDirectedGraphicalModel:
         #select best
         result = self.prior_past[:, :self.num_beams,1:]
         return result
-        best_idx = (torch.mean(result.cpu().float(), dim=0).view(self.num_beams,-1) - torch.tensor(mixture).view(1, -1)).norm(p=2, dim=1).argmin()
-        return result[:, best_idx]
+        # best_idx = (torch.mean(result.cpu().float(), dim=0).view(self.num_beams,-1) - torch.tensor(mixture).view(1, -1)).norm(p=2, dim=1).argmin()
+        # return result[:, best_idx]
 
 
 
