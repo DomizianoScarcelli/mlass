@@ -7,6 +7,7 @@ to separate.
 from dataclasses import dataclass, field
 from typing import Tuple, List, Any, Optional, Mapping, Callable, Literal
 
+from pathlib import Path
 import shutil
 import hydra
 import torch
@@ -28,7 +29,7 @@ import multiprocessing as mp
 from typing import Sequence
 from numpy.random import default_rng
 from torch.utils.data import Dataset
-
+from diba.diba.utils import save_psnr
 
 class TripletsDataset(Dataset):
     def __init__(self, dataset: Sequence, seed: int = 0):
@@ -311,6 +312,7 @@ def main(cfg):
         gtm = (gt1 + gt2 + gt3) / 3.0
         psnr = batched_psnr_unconditional(
             gts=[gt1, gt2, gt3], gens=[gen1, gen2, gen3])
+        save_psnr(psnr, Path("lass_mnist") / Path("psrn_gm_3sources_raw.json"))
         print(
             f"The psnr before refining for batch {i} is {psnr}")
 
@@ -336,6 +338,7 @@ def main(cfg):
 
         psnr = batched_psnr_unconditional(
             gts=[gt1, gt2, gt3], gens=[gen1, gen2, gen3])
+        save_psnr(psnr, Path("lass_mnist") / Path("psrn_gm_3sources.json"))
         print(
             f"\nThe psnr for batch {i} is {psnr}")
         psnrs.append(psnr)
