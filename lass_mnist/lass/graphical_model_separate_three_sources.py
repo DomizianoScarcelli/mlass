@@ -210,8 +210,8 @@ class EvaluateSeparationConfig:
 
     latent_length: int = MISSING
     vocab_size: int = MISSING
-    # batch_size: int = 32
-    batch_size: int = 1
+    batch_size: int = 8
+    # batch_size: int = 1
     class_conditioned: bool = False
     num_workers: int = mp.cpu_count() - 1
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -323,7 +323,7 @@ def main(cfg):
             gen2lat,
             gen3lat,
             gtm,
-            n_iterations=1, #TODO: debug
+            n_iterations=500, #TODO: debug
             learning_rate=1e-1,
         )
 
