@@ -22,6 +22,8 @@ MODELS = {
 }
 
 
+device = "cuda" if t.cuda.is_available() else "cpu"
+
 def load_checkpoint(path):
     restore = path
     if restore.startswith(REMOTE_PREFIX):
@@ -36,7 +38,7 @@ def load_checkpoint(path):
                 download(remote_path, local_path)
         restore = local_path
     dist.barrier()
-    checkpoint = t.load(restore, map_location=t.device('cpu'))
+    checkpoint = t.load(restore, map_location=t.device(device))
     print("Restored from {}".format(restore))
     return checkpoint
 
@@ -199,7 +201,6 @@ def make_prior(hps, vqvae, device='cuda'):
         print_all(f"Loading prior in eval mode")
         prior.eval()
         freeze_model(prior)
-        print_all(f"Finished loading prior in eval mode")
     return prior
 
 
@@ -213,7 +214,7 @@ def make_model(model, device, hps, levels=None):
         levels = range(len(priors))
     print_all(f"Loading {len(levels)} priors")
     priors = [make_prior(setup_hparams(priors[level], dict()),
-                         vqvae, 'cpu') for level in levels]
+                         vqvae, device) for level in levels]
     print_all("All priors correctly loaded")
     return vqvae, priors
 
@@ -275,7 +276,6 @@ def run(model, port=29500, **kwargs):
     # from lass_audio.jukebox.utils.dist_utils import setup_dist_from_mpi
     # rank, local_rank, device = setup_dist_from_mpi(port=port)
 
-    device = t.device("cpu")
     hps = Hyperparams(**kwargs)
 
     with t.no_grad():

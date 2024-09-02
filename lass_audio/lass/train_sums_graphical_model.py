@@ -1,8 +1,7 @@
 import argparse
 import re
-from pathlib import Path
-from typing import Sequence, Tuple, Union
-
+from pathlib import Path 
+from typing import Sequence, Tuple, Union, List
 import numpy as np
 import sparse
 import torch
@@ -16,6 +15,24 @@ from .utils import ROOT_DIRECTORY
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+NUM_SOURCES = 3
+
+def split_datapoints_by_step(datapoints: torch.Tensor, batch_size: int, step: int, device) -> torch.Tensor:
+    batches = []
+    batched_size = batch_size // step
+    for i in range(step):
+        batches.append(
+            datapoints[i * batched_size: (i + 1) * batched_size])
+    result = torch.stack(batches).to(device)
+    return result
+
+def get_mixtures(datapoints: torch.Tensor, device) -> torch.Tensor:
+    mixtures = []
+    for i in range(2, len(datapoints)+1):
+        # Build the mixtures of the images up to index i
+        mixture = torch.mean(datapoints[:i], dim=0)
+        mixtures.append(mixture)
+    return torch.stack(mixtures).to(device)
 
 def load_checkpoint(checkpoint_path: Union[Path, str]) -> Tuple[sparse.COO, int]:
     """Load ceckpoint containing the distribution of sum of the VQ-VAE
@@ -66,7 +83,8 @@ def estimate_distribution(
         alpha: Convex coefficients for the mixture
         save_iters: Number of iterations before storing of estiamtion checkpoint
         checkpoint_path: Path used for resuming estimation
-
+    
+    NOTE: The correctness is tested in ./tests/sums_test.py
     """
 
     def compute_latent(x: torch.Tensor, vqvae: VQVAE, level: int) -> Sequence[int]:
@@ -82,7 +100,6 @@ def estimate_distribution(
     # instantiate the vqvae model and audio dataset
     vqvae = make_vqvae(hps, device)
     audio_dataset = FilesAudioDataset(hps)
-    
 
     # prepare data-loader
     dataset_loader = DataLoader(
@@ -99,56 +116,70 @@ def estimate_distribution(
     # load checkpoint if available
     if checkpoint_path is not None:
         sum_dist, iterations = load_checkpoint(checkpoint_path)
-        prefix_i, prefix_j, prefix_k = sum_dist.coords.tolist()
+        prefix_s, prefix_i, prefix_j, prefix_k = sum_dist.coords.tolist()
         prefix_data = sum_dist.data.tolist()
         del sum_dist
     else:
-        prefix_i, prefix_j, prefix_k, prefix_data = [], [], [], []
+        prefix_s, prefix_i, prefix_j, prefix_k, prefix_data = [], [], [], [], []
         iterations = 0
 
-    # initialize loop variables
-    buffer_add_1, buffer_add_2, buffer_sum = [], [], []
+    buffer_adds: List[List[int]] = [[] for _ in range(NUM_SOURCES)]
+    buffer_sums: List[List[int]] = [[] for _ in range(NUM_SOURCES-1)]
 
     # run estimation loop
     with torch.no_grad():
         for epoch in range(epochs):
             for batch_idx, batch in enumerate(tqdm(dataset_loader, desc=f"Epoch: {epoch}/{epochs} | Separating audio...")):
-                # x shape is:  torch.Size([batch_size (8), 524288, 1]
+                # x shape is torch.Size([batch_size, 524288, 1]
                 x = audio_preprocess(batch, hps=hps)
-
                 # get tracks from batch
-                # x_1 shape is:  torch.Size([batch_size // 2 (4), 524288, 1]
-                x_1 = x[: batch_size // 2].to(device)
-                # x_2 shape is:  torch.Size([4, 524288, 1]
-                x_2 = x[batch_size // 2:].to(device)
-                # x_sum shape is:  torch.Size([4, 524288, 1]
-                x_sum = alpha[0] * x_1 + alpha[1] * x_2
+                # xs shape is torch.Size([num_sources, batch_size // num_sources, 524288, 1]
+                xs = split_datapoints_by_step(x, batch_size, step=NUM_SOURCES, device=device)
+                assert xs.shape[0] == NUM_SOURCES
 
-                # compute_latent x_1 shape is:  torch.Size([batch_size (8) * 2048 = 16384]
-                buffer_add_1.extend(compute_latent(x_1, vqvae, vqvae_level))
-                # compute_latent x_2 shape is:  torch.Size([16384]
-                buffer_add_2.extend(compute_latent(x_2, vqvae, vqvae_level))
-                # compute_latent x_sum shape is:  torch.Size([16384]
-                buffer_sum.extend(compute_latent(x_sum, vqvae, vqvae_level))
+                # mixtures shape is torch.Size([2, 2, 524288, 1]
+                mixtures = get_mixtures(datapoints=xs, device=device)
+                assert mixtures.shape[0] == NUM_SOURCES-1 
+                
+                # compute latent vectors
+                for i, x_i in enumerate(xs):
+                    # compute_latent(x_i) shape is torch.Size([2048 * 4 = 8192])
+                    buffer_adds[i].extend(compute_latent(x_i, vqvae, vqvae_level))
+                for i, m_i in enumerate(mixtures):
+                    # compute_latent(m_i) shape is torch.Size([2048 * 4 = 8192])
+                    buffer_sums[i].extend(compute_latent(m_i, vqvae, vqvae_level))
 
                 # save output
                 iterations += 1
-                if iterations % save_iters == 0:
-                    coords = [
-                            prefix_i + buffer_add_1 + buffer_add_2,
-                            prefix_j + buffer_add_2 + buffer_add_1,
-                            prefix_k + buffer_sum + buffer_sum,
-                    ]
-                    data = prefix_data + [1] * (len(buffer_add_1) * 2)
-                    print(f"Coords len: ", len(coords))
-                    print(f"Coords elements len: ", [len(elem) for elem in coords])
-                    print(f"Data len: ", len(data))
+                #NOTE: save_iters defaults to 500
+                if iterations % save_iters == 0: 
+                    if NUM_SOURCES not in [2,3]:
+                        raise NotImplementedError("Train sums implemeneted just for 2 and 3 sources")
+
+                    coords = []
+                    data = []
+                    for i in range(NUM_SOURCES-1):
+                        if i == 0:
+                            coords = [
+                                    prefix_s + [i] * len(buffer_adds[0]) * 2,
+                                    prefix_i + buffer_adds[i] + buffer_adds[i+1],
+                                    prefix_j + buffer_adds[i+1] + buffer_adds[i],
+                                    prefix_k + buffer_sums[i] + buffer_sums[i]
+                            ]
+                            data = prefix_data + [1] * (len(buffer_adds[1]) * 2)
+                        else:
+                            coords=[
+                                coords[0] + [i] * (len(buffer_adds[0]) + len(buffer_sums[0])),
+                                coords[1] + buffer_sums[i-1] + buffer_adds[i+1],
+                                coords[2] + buffer_adds[i+1] + buffer_sums[i-1],
+                                coords[3] + buffer_sums[i] + buffer_sums[i],
+                            ]
+                            data += [1] * (len(buffer_adds[1]) * 2)
                     sum_dist = sparse.COO(
                         coords=coords,
                         data=data,
-                        shape=[latent_bins, latent_bins, latent_bins],
+                        shape=[NUM_SOURCES-1, latent_bins, latent_bins, latent_bins],
                     )
-
                     # store results
                     output_dir = Path(output_dir)
                     output_dir.mkdir(parents=True, exist_ok=True)
@@ -157,12 +188,15 @@ def estimate_distribution(
 
                     # load compressed matrix
                     sum_dist, iterations = load_checkpoint(checkpoint_path)
-                    prefix_i, prefix_j, prefix_k = sum_dist.coords.tolist()
+                    prefix_s, prefix_i, prefix_j, prefix_k = sum_dist.coords.tolist()
                     prefix_data = sum_dist.data.tolist()
                     del sum_dist
 
                     # reset loop variables
-                    buffer_add_1, buffer_add_2, buffer_sum = [], [], []
+                    buffer_adds: List[List[int]] = [[] for _ in range(NUM_SOURCES)]
+                    buffer_sums: List[List[int]] = [[] for _ in range(NUM_SOURCES-1)]
+
+                    print(f"Checkpoint saved at ", checkpoint_path)
 
 
 if __name__ == "__main__":
@@ -180,13 +214,13 @@ if __name__ == "__main__":
         "--audio-files-dir",
         type=str,
         help="Directory containing the audio files",
-        default=str(ROOT_DIRECTORY / "data/train"),
+        default=str(ROOT_DIRECTORY / "data/train")
     )
     parser.add_argument(
         "--output-dir",
         type=str,
         help="Directory in which the output estimation will be stored",
-        default=str(ROOT_DIRECTORY / "logs/vqvae_sum_distribution"),
+        default=str(ROOT_DIRECTORY / "logs/vqvae_sum_distribution_gm"),
     )
     parser.add_argument("--epochs", type=int,
                         help="Number of epochs", default=100)

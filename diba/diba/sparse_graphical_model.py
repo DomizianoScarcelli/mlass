@@ -1,12 +1,15 @@
+import gc
 import torch
 from tqdm import tqdm
 import math
 from diba.diba import SeparationPrior
+import numpy as np
 from typing import List, Optional, Union
-from .utils import normalize_logits
-import torch.nn.functional as F
 
-class DirectedGraphicalModel:
+from diba.diba.sparse_utils import convert_torch_coo_to_sparse_coo, sparse_elementwise_div, sparse_expand, sparse_expand_as, sparse_normalize, sparse_permute, convert_sparse_coo_to_torch_coo
+from .utils import normalize_logits
+
+class SparseDirectedGraphicalModel:
     """
     Represents the Bayesian Network with the latent codes z_1,...,z_n and the
     mixtures m_1,...,m_n at all the stages i.
@@ -15,46 +18,53 @@ class DirectedGraphicalModel:
     def __init__(self, 
                  priors: List[SeparationPrior],
                  sums: torch.Tensor,
-                 num_sources:int):
-        self.K = 256 #possible discrete values in the latent codes
+                 num_tokens: int,
+                 num_sources: int,
+                 topk: Optional[int] = None):
+        self.K = num_tokens #possible discrete values in the latent codes
         self.num_sources = num_sources
         self.priors = priors
         self.past_key = [None for _ in range(num_sources)]
+        self.num_beams = 2
+        self.device = sums.device
+        self.topk = None
 
-        self.p_mmzs = torch.log(1e-12 + sums)
-        print(self.p_mmzs.shape)
-        # self.p_mmzs -= torch.logsumexp(self.p_mmzs, dim=[2,3]).unsqueeze(2).unsqueeze(3)
-        self.p_mmzs -= torch.logsumexp(self.p_mmzs, dim=1).unsqueeze(1)
-        # self.pm = torch.logsumexp(self.p_mmzs, dim=[2,3])[-1].squeeze()
-        self.pm = 0
-    
+        print(f"Using device: {self.device}")
+        
+        # Take the log
+        if len(sums.shape) == 3:
+            sums = sums.unsqueeze(0)
+        sums = sparse_permute(sums, (0,3,1,2))
+        # sums = sparse_normalize(sums, dim=1).to(self.device)
+        #Indices of n_sums and sums are equal :)
+        self.p_mmzs = sums
+        self.pm = 0 
+
+           
     def compute_priors(self, past) -> List[SeparationPrior]:
-        # p_zs[i] = p(z_i)
-        self.p_zs = torch.empty((self.num_sources, self.K, self.K))
+        self.p_zs = torch.empty((self.num_sources, self.num_beams, self.K)).to(self.device)
         for i in range(self.num_sources):
             log_prior, past_key = self.priors[i]._get_logits(
                     past[i],
                     self.past_key[i])
-            log_prior = normalize_logits(log_prior) - self.pm
-
-            # NOTE: this is pretty much useless for the UnconditionedTransformerPrior since the past key is always none
-            self.past_key[i] = past_key
-
+            log_prior = (normalize_logits(log_prior) - self.pm).to(self.device)
+            self.past_key[i] = past_key.to(self.device) if past_key is not None else past_key
             self.p_zs[i] = log_prior
-                
         return self.priors
-
+    
     def forward_pass(self, i: int, token_idx: torch.Tensor):
         """
         It computes the message μα in the graphical model forward pass.
         """
-        # shape is [256, 256, 256] = [K, K, K]
-        # shape is [2, 256] = [num_sources, K]
+        # B x K -> K
         prior = torch.logsumexp(self.p_zs[i], dim=0)
+        # 1 x K x K
+        sums = torch.log(self.p_mmzs[i, token_idx].unsqueeze(0).to_dense() + 1e-12)
         if i == 0:
-            return torch.logsumexp(self.p_mmzs[i, token_idx].unsqueeze(0) + prior, dim=-1)
-        old_message = torch.logsumexp(prior + self.forward_results[i-1], dim=-1) # this was -1, but with 0 the performances are better
-        final_message = torch.logsumexp(self.p_mmzs[i, token_idx].unsqueeze(0) + old_message , dim=1)
+            # 1 x K
+            return torch.logsumexp(sums + prior, dim=-1)
+        old_message = torch.logsumexp(prior + self.forward_results[i-1], dim=0)
+        final_message = torch.logsumexp(old_message + sums, dim=1)
         return final_message
 
     def backward_pass(self, i: int, token_idx: torch.Tensor):
@@ -62,14 +72,17 @@ class DirectedGraphicalModel:
         It computes the message μβ in the graphical model backward pass.
         """
         prior = torch.logsumexp(self.p_zs[i+1], dim=0)
+        sums = torch.log(self.p_mmzs[i, token_idx].unsqueeze(0).to_dense() + 1e-12)
         if i == self.num_sources-2:
-            return torch.logsumexp(prior + self.p_mmzs[i, token_idx].unsqueeze(0), dim=-1)
+            # 1 x K
+            return torch.logsumexp(prior + sums, dim=-1)
         
-        old_message = torch.logsumexp(self.p_mmzs[i, token_idx].unsqueeze(0) + self.backward_results[i+1], dim=0)
-        final_message = torch.logsumexp(prior + old_message, dim=-1) # this was -1, but with 0 the performances are better
-        return final_messag0
- 
+        old_message = torch.logsumexp(sums + self.backward_results[i+1], dim=0)
+        final_message = torch.logsumexp(prior + old_message, dim=0) 
+        return final_message
+
     def compute_marginals(self, i: int) -> torch.Tensor:
+        # prior = torch.logsumexp(self.p_zs[i], dim=-1).unsqueeze(-1)
         prior = self.p_zs[i]
         if i == 0:
             return prior + self.backward_results[i] 
@@ -77,14 +90,14 @@ class DirectedGraphicalModel:
             return prior + self.forward_results[i-1] 
         else:
             return prior + torch.logsumexp(self.forward_results[i-1] + self.backward_results[i], dim=0)
-
-    def single_sample(self, marginals: torch.Tensor, topk: Union[bool, int]= True) -> torch.Tensor:
+    
+    def single_sample(self, marginals: torch.Tensor, topk: Optional[int]=None) -> torch.Tensor:
         if topk:
-            topk_values, topk_indices = torch.topk(marginals, k=topk, dim=-1)
-            m = torch.full_like(marginals, fill_value=math.log(1e-12))
+            _, topk_indices = torch.topk(marginals, k=topk, dim=-1)
+            m = torch.full_like(marginals, fill_value=math.log(1e-12)).to(self.device)
             m[:, :,topk_indices] = marginals[:, :,topk_indices]
             marginals = m
-        sample = torch.distributions.Categorical(logits=marginals).sample()
+        sample = torch.distributions.Categorical(logits=marginals).sample().to(self.device)
         return sample
 
     def single_separate(self, mixture: torch.Tensor, i: int) -> torch.Tensor:
@@ -93,7 +106,7 @@ class DirectedGraphicalModel:
         self.marginal_results = []
 
         for j in range(self.num_sources-1):
-            forward = self.forward_pass(j, mixture[i])
+            forward = self.forward_pass(j, mixture[i]).squeeze()
             # print("Forward: ", forward.shape)
             self.forward_results.append(forward)
         
@@ -111,8 +124,8 @@ class DirectedGraphicalModel:
 
         marginals = torch.stack(self.marginal_results)
         # marginals = self.one_shot(mixture[i])
-
-        result = self.single_sample(marginals, topk=64)
+        
+        result = self.single_sample(marginals, topk=self.topk)
         return result
 
     # def one_shot(self, token: torch.Tensor) -> torch.Tensor:
@@ -125,15 +138,23 @@ class DirectedGraphicalModel:
     #     return torch.stack([marginal_0, marginal_1])
 
     def separate(self, mixture: torch.Tensor) -> torch.Tensor:
-        self.prior_past = torch.full((self.num_sources, self.K, len(mixture)+1), fill_value=-1, dtype=torch.long)
+        #NOTE: I'm pretty sure this is correct
+        self.prior_past = torch.full((self.num_sources, self.K, len(mixture)+1), fill_value=-1, dtype=torch.long).to(self.device)
         self.prior_past[:,:, 0] = 0
-
+        
         for i in tqdm(range(len(mixture)), desc="Separating mixture...", leave=False):
-            self.compute_priors(past=self.prior_past[:, :, :i+1])
-            sample = self.single_separate(mixture, i)
-            self.prior_past[:, :, i+1] = sample
-            # print(self.prior_past)
-        return self.prior_past[:,:,1:]
+            self.compute_priors(past=self.prior_past[:, :self.num_beams, :i+1])
+            sample = self.single_separate(mixture, i).to(self.device)
+            self.prior_past[:, :self.num_beams, i+1] = sample
+        print(self.prior_past)
+        # Shape: (N, B, K) -> (N, 1, K)
+        # return self.prior_past[:,:self.num_beams,1:][:,-1]
+        # Shape: (N, B, K)
+        
+        #select best
+        result = self.prior_past[:, :self.num_beams,1:]
+        return result
+
 
 
 

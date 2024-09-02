@@ -12,10 +12,13 @@ from torchvision.utils import save_image
 import numpy as np
 import random
 from ..modules import VectorQuantizedVAE
+
+from lass_mnist.lass.diba_interaces import UnconditionedTransformerPrior
 from .utils import refine_latents, CONFIG_DIR, ROOT_DIR, CONFIG_STORE
+from diba.diba.sparse_graphical_model import SparseDirectedGraphicalModel
 from diba.diba.graphical_model import DirectedGraphicalModel
 import multiprocessing as mp
-from typing import Sequence
+from typing import Sequence, Union
 from numpy.random import default_rng
 from torch.utils.data import Dataset
 
@@ -87,7 +90,7 @@ def select_closest_to_mixture(
 @torch.no_grad()
 def generate_samples(
     model: VectorQuantizedVAE,
-    graphical_model: DirectedGraphicalModel,
+    graphical_model: Union[SparseDirectedGraphicalModel, DirectedGraphicalModel],
     gts: Tuple[torch.Tensor, torch.Tensor],
     bos: Tuple[int, int],
     latent_length: int,
@@ -163,7 +166,7 @@ class EvaluateSeparationConfig:
 
     latent_length: int = MISSING
     vocab_size: int = MISSING
-    batch_size: int = 64
+    batch_size: int = 1
     class_conditioned: bool = False
     num_workers: int = mp.cpu_count() - 1
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -218,9 +221,24 @@ def main(cfg):
     # set models to eval
     model.eval()
     transformer.eval()
+    
+    NUM_SOURCES = 2
+    priors = [UnconditionedTransformerPrior(transformer=transformer, sos=0) for _ in range(NUM_SOURCES)]
 
-    graphical_model = DirectedGraphicalModel(transformer=transformer, 
-                                             num_sources=2)
+    p_mmzs_path = "./lass_mnist/models/sums-MNIST-gm/best_210.pt"
+    # p_mmzs_path = cfg.checkpoints.sums 
+    with open(p_mmzs_path, "rb") as f:
+        # sums = torch.load(f).permute(2,0,1).unsqueeze(0)
+        sums = torch.load(f)
+    
+    # sums /= (sums + 1e-12).sum(dim=1).unsqueeze(1)
+    # graphical_model = SparseDirectedGraphicalModel(priors=priors,
+    #                                          sums=sums.to_sparse(),
+    #                                          num_sources=NUM_SOURCES,
+    #                                             num_tokens=256)
+    graphical_model = DirectedGraphicalModel(priors=priors,
+                                             sums=sums,
+                                             num_sources=NUM_SOURCES)
     uncond_bos = 0
 
     print("Start separation")

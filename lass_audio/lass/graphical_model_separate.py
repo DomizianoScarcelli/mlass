@@ -1,25 +1,25 @@
 import abc
 import functools
 from pathlib import Path
-from typing import Callable, List, Mapping
+from typing import Callable, List, Mapping, Optional
 
-from diba.diba import fast_beamsearch_separation, fast_sampled_separation
 import numpy as np
+import sparse
 import torch
 import torchaudio
 import tqdm
-from diba.diba import Likelihood
 from torch.utils.data import DataLoader
 from diba.diba.interfaces import SeparationPrior
+from diba.diba.sparse_graphical_model import SparseDirectedGraphicalModel
 
-from lass_audio.jukebox.utils.dist_utils import setup_dist_from_mpi
+from diba.diba.sparse_utils import convert_sparse_coo_to_torch_coo
 from lass_audio.lass.datasets import SeparationDataset
 from lass_audio.lass.datasets import SeparationSubset
 from lass_audio.lass.diba_interfaces import JukeboxPrior, SparseLikelihood
 from lass_audio.lass.utils import assert_is_audio, decode_latent_codes, get_dataset_subsample, get_raw_to_tokens, setup_priors, setup_vqvae
 from lass_audio.lass.datasets import ChunkedPairsDataset
 from diba.diba.utils import save_sdr, compute_sdr
-
+import copy
 
 audio_root = Path(__file__).parent.parent
 
@@ -33,106 +33,72 @@ class Separator(torch.nn.Module, abc.ABC):
         ...
 
 
-class BeamsearchSeparator(Separator):
+class SparseDirectedGraphicalSeparator(Separator):
     def __init__(
-        self,
-        encode_fn: Callable,
-        decode_fn: Callable,
-        priors: Mapping[str, SeparationPrior],
-        likelihood: Likelihood,
-        num_beams: int,
-    ):
-        print("inside BeamsearchSeparator init method")
+            self,
+            encode_fn: Callable,
+            decode_fn: Callable,
+            priors: Mapping[str, SeparationPrior],
+            sums: torch.Tensor,
+            topk: Optional[int] = None
+            ):
         super().__init__()
-        self.likelihood = likelihood
         self.source_types = list(priors)
         self.priors = list(priors.values())
-        self.num_beams = num_beams
-
+        
+        self.sums = sums
+        self.num_tokens=sums.shape[-1]
+        self.topk = topk
         # lambda x: vqvae.encode(x.unsqueeze(-1), vqvae_level, vqvae_level + 1).view(-1).tolist()
         self.encode_fn = encode_fn
         # lambda x: decode_latent_codes(vqvae, x.squeeze(0), level=vqvae_level)
         self.decode_fn = decode_fn
+        self.gm = SparseDirectedGraphicalModel(
+                priors = self.priors,
+                sums=self.sums,
+                num_tokens=self.num_tokens,
+                num_sources=2,
+                topk=self.topk)
 
     @torch.no_grad()
     def separate(self, mixture: torch.Tensor) -> Mapping[str, torch.Tensor]:
         # convert signal to codes
-
-        print("The mixture code shape when beam separating is: ", mixture.shape)
         mixture_codes = self.encode_fn(mixture)
 
         # separate mixture (x has shape [2, num. tokens])
-        x = fast_beamsearch_separation(
-            priors=self.priors,
-            likelihood=self.likelihood,
-            mixture=mixture_codes,
-            num_beams=self.num_beams,
-        )
+        x = self.gm.separate(mixture=mixture_codes).to(self.sums.device)
+        print(f"x shape: {x.shape}")
 
-        # decode results
-        return {source: self.decode_fn(xi) for source, xi in zip(self.source_types, x)}
-
-
-class TopkSeparator(Separator):
-    def __init__(
-        self,
-        encode_fn: Callable,
-        decode_fn: Callable,
-        priors: Mapping[str, SeparationPrior],
-        likelihood: Likelihood,
-        num_samples: int,
-        temperature: float = 1.0,
-        top_k: int = None,
-    ):
-        super().__init__()
-        self.likelihood = likelihood
-        self.source_types = list(priors)
-        self.priors = list(priors.values())
-        self.num_samples = num_samples
-        self.temperature = temperature
-        self.top_k = top_k
-
-        self.encode_fn = encode_fn
-        self.decode_fn = decode_fn
-
-    def separate(self, mixture: torch.Tensor):
-        mixture_codes = self.encode_fn(mixture)
-
-        x_0, x_1 = fast_sampled_separation(
-            priors=self.priors,
-            likelihood=Likelihood,
-            mixture=mixture_codes,
-            num_samples=self.num_samples,
-            temperature=self.temperature,
-            top_k=self.top_k,
-        )
-
-        # decode results
-        dec_bs = 32
-        num_batches = int(np.ceil(self.num_samples / dec_bs))
+        x_0, x_1 = x[0], x[1]
+        dec_bs = 1
+        num_batches = int(np.ceil(self.gm.num_beams / dec_bs))
         res_0, res_1 = [None]*num_batches, [None]*num_batches
 
+        print(x_0.shape, x_1.shape)
+
         for i in range(num_batches):
-            res_0[i] = self.decode_fn([x_0[i * dec_bs:(i + 1) * dec_bs]])
-            res_1[i] = self.decode_fn([x_1[i * dec_bs:(i + 1) * dec_bs]])
+            res_0[i] = self.decode_fn(x_0[i * dec_bs:(i + 1) * dec_bs].flatten())
+            res_1[i] = self.decode_fn(x_1[i * dec_bs:(i + 1) * dec_bs].flatten())
 
-        res_0 = torch.cat(res_0, dim=0)
-        res_1 = torch.cat(res_1, dim=0)
-
+        res_0 = torch.cat(res_0, dim=0).view(self.gm.num_beams, -1)
+        res_1 = torch.cat(res_1, dim=0).view(self.gm.num_beams, -1)
+        
+        print(res_0.shape, res_1.shape)
+        mean = torch.mean(torch.stack([res_0, res_1], dim=0), dim=0).cpu()
+        print(mean.shape)
         # select best
-        best_idx = (0.5 * res_0 + 0.5 * res_1 -
-                    mixture.view(1, -1)).norm(p=2, dim=-1).argmin()
-        return {source: self.decode_fn(xi) for source, xi in zip(self.source_types, [x_0[best_idx], x_1[best_idx]])}
+        best_idx = (mean - torch.tensor(mixture).view(1, -1)).norm(p=2, dim=-1).argmin()
+        return {source: self.decode_fn(xi.flatten()) for source, xi in zip(self.source_types, [x_0[best_idx], x_1[best_idx]])}
 
+        # return {source: self.decode_fn(xi.flatten()) for source, xi in zip(self.source_types, x)}
 
 # -----------------------------------------------------------------------------
-
 
 @torch.no_grad()
 def separate_dataset(
     dataset: SeparationDataset,
     separator: Separator,
-    save_path: str,
+    save_path: Path,
     save_fn: Callable,
     resume: bool = False,
     num_workers: int = 0,
@@ -195,21 +161,23 @@ def save_separation(
                         ori.cpu(), sample_rate=sample_rate)
         torchaudio.save(str(path / f"sep{i+1}.wav"),
                         sep.cpu(), sample_rate=sample_rate)
+        
 
 
 def main(
-    audio_dir_1: str = audio_root / "data/test/bass",
-    audio_dir_2: str = audio_root / "data/test/drums",
-    vqvae_path: str = audio_root / "checkpoints/vqvae.pth.tar",
-    prior_1_path: str = audio_root / "checkpoints/prior_bass_44100.pth.tar",
-    prior_2_path: str = audio_root / "checkpoints/prior_drums_44100.pth.tar",
-    sum_frequencies_path: str = audio_root / "checkpoints/sum_frequencies.npz",
+    audio_dir_1: Path = audio_root / "data/test/bass",
+    audio_dir_2: Path = audio_root / "data/test/drums",
+    vqvae_path: Path = audio_root / "checkpoints/vqvae.pth.tar",
+    prior_1_path: Path = audio_root / "checkpoints/prior_bass_44100.pth.tar",
+    prior_2_path: Path = audio_root / "checkpoints/prior_drums_44100.pth.tar",
+    sum_frequencies_path: Path = audio_root / "checkpoints/sum_frequencies.npz",
+    # sum_frequencies_path: Path = audio_root / "checkpoints/sum_dist_43500.npz",
     vqvae_type: str = "vqvae",
     prior_1_type: str = "small_prior",
     prior_2_type: str = "small_prior",
     max_sample_tokens: int = 1024,
     sample_rate: int = 44100,
-    save_path: str = audio_root / "separated-audio",
+    save_path: Path = audio_root / "separated-audio",
     resume: bool = True,
     num_pairs: int = 100,
     seed: int = 0,
@@ -224,7 +192,7 @@ def main(
     #    raise ValueError(f"Path {save_path} already exists!")
 
     # rank, local_rank, device = setup_dist_from_mpi(port=29533, verbose=True)
-    device = torch.device("cpu")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # setup models
     vqvae = setup_vqvae(
@@ -248,23 +216,6 @@ def main(
     }
     print("Priors setup completed")
 
-    # create separator
-    level = vqvae.levels - 1
-    print("Creating separator")
-    separator = BeamsearchSeparator(
-        encode_fn=lambda x: vqvae.encode(
-            x.unsqueeze(-1).to(device), level, level + 1)[-1].squeeze(0).tolist(),  # TODO: check if correct
-        decode_fn=lambda x: decode_latent_codes(
-            vqvae, x.squeeze(0), level=level),
-        priors={k: JukeboxPrior(p.prior, torch.zeros(
-            (), dtype=torch.float32, device=device)) for k, p in priors.items()},
-        #TODO: the SparseLikelihood._normalize_matrix method causes a bus error
-        likelihood=SparseLikelihood(sum_frequencies_path, device, 3.0),
-        num_beams=10,
-        **kwargs,
-    )
-    print(f"Separator setup completed")
-
     # setup dataset
     raw_to_tokens = get_raw_to_tokens(vqvae.strides_t, vqvae.downs_t)
     dataset = ChunkedPairsDataset(
@@ -279,6 +230,27 @@ def main(
     indices = get_dataset_subsample(len(dataset), num_pairs, seed=seed)
     subdataset = SeparationSubset(dataset, indices=indices)
 
+    with open(sum_frequencies_path, "rb") as f:
+        sums_coo: sparse.COO = sparse.load_npz(sum_frequencies_path)
+        sums = convert_sparse_coo_to_torch_coo(sums_coo, device).to(device)
+        print("Sums: ", sums)
+
+    # create separator
+    level = vqvae.levels - 1
+    print("Creating separator")
+    separator = SparseDirectedGraphicalSeparator(
+        encode_fn=lambda x: vqvae.encode(
+            x.unsqueeze(-1).to(device), level, level + 1)[-1].squeeze(0).tolist(), 
+        decode_fn=lambda x: decode_latent_codes(
+            vqvae, x.squeeze(0), level=level),
+        priors={k: JukeboxPrior(p.prior, torch.zeros(
+            (), dtype=torch.float32, device=device)) for k, p in priors.items()},
+        sums=sums,
+        topk=64,
+        **kwargs,
+    )
+    print(f"Separator setup completed")
+
     # separate subsample
     separate_dataset(
         dataset=subdataset,
@@ -287,6 +259,7 @@ def main(
         save_fn=functools.partial(save_separation, sample_rate=sample_rate),
         resume=resume,
     )
+
 
 
 if __name__ == "__main__":

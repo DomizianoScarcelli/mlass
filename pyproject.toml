@@ -1,0 +1,2 @@
+[tool.pyright]
+include = ["lass_audio", "diba", "lass_mnist"]
