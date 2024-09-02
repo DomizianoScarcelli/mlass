@@ -25,8 +25,9 @@ class SparseDirectedGraphicalModel:
         self.num_sources = num_sources
         self.priors = priors
         self.past_key = [None for _ in range(num_sources)]
-        self.num_beams = 2
+        self.num_beams = 60
         self.device = sums.device
+        # self.topk = self.num_beams
         self.topk = None
 
         print(f"Using device: {self.device}")
@@ -35,10 +36,10 @@ class SparseDirectedGraphicalModel:
         if len(sums.shape) == 3:
             sums = sums.unsqueeze(0)
         sums = sparse_permute(sums, (0,3,1,2))
-        # sums = sparse_normalize(sums, dim=1).to(self.device)
+        sums = sparse_normalize(sums, dim=1).to(self.device)
         #Indices of n_sums and sums are equal :)
         self.p_mmzs = sums
-        self.pm = 0 
+        self.pm = 0
 
            
     def compute_priors(self, past) -> List[SeparationPrior]:
@@ -62,9 +63,9 @@ class SparseDirectedGraphicalModel:
         sums = torch.log(self.p_mmzs[i, token_idx].unsqueeze(0).to_dense() + 1e-12)
         if i == 0:
             # 1 x K
-            return torch.logsumexp(sums + prior, dim=1)
-        old_message = torch.logsumexp(prior + self.forward_results[i-1], dim=0)
-        final_message = torch.logsumexp(old_message + sums, dim=1)
+            return torch.logsumexp(sums + prior, dim=-1)
+        old_message = torch.logsumexp(prior + self.forward_results[i-1], dim=1).unsqueeze(1) #NOTE:
+        final_message = torch.logsumexp(sums + old_message, dim=1) #NOTE:
         return final_message
 
     def backward_pass(self, i: int, token_idx: torch.Tensor):
@@ -77,12 +78,12 @@ class SparseDirectedGraphicalModel:
             # 1 x K
             return torch.logsumexp(prior + sums, dim=-1)
         
-        old_message = torch.logsumexp(sums + self.backward_results[i+1], dim=0)
-        final_message = torch.logsumexp(prior + old_message, dim=0) 
+        old_message = torch.logsumexp(sums + self.backward_results[i+1], dim=1).unsqueeze(1) #NOTE: choose 0,1,2
+        final_message = torch.logsumexp(prior + old_message, dim=1) #NOTE:
         return final_message
 
     def compute_marginals(self, i: int) -> torch.Tensor:
-        # prior = torch.logsumexp(self.p_zs[i], dim=-1).unsqueeze(-1)
+        # prior = torch.logsumexp(self.p_zs[i], dim=0).unsqueeze(0)
         prior = self.p_zs[i]
         if i == 0:
             return prior + self.backward_results[i] 
@@ -106,7 +107,7 @@ class SparseDirectedGraphicalModel:
         self.marginal_results = []
 
         for j in range(self.num_sources-1):
-            forward = self.forward_pass(j, mixture[i]).squeeze()
+            forward = self.forward_pass(j, mixture[i])
             # print("Forward: ", forward.shape)
             self.forward_results.append(forward)
         

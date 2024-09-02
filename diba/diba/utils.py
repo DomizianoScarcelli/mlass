@@ -62,18 +62,32 @@ def normalize_logits(x: torch.Tensor, temperature: float = 1.0) -> torch.Tensor:
     return torch.distributions.Categorical(logits=x / temperature).logits
 
 
-def compute_sdr(s_ref: torch.Tensor, s_est: torch.Tensor):
+def compute_sdr(s_ref: torch.Tensor, s_est: torch.Tensor) -> float:
+    # SDR for (s_ref, s_est)
     power_ref = torch.sum(s_ref ** 2)
     power_error = torch.sum((s_ref - s_est) ** 2)
-    sdr = 10 * torch.log10(power_ref / power_error)
-    return sdr.item()
+    sdr_1 = 10 * torch.log10(power_ref / power_error)
+    
+    print(f"SDR_1: {sdr_1}")
+    # SDR for (s_est, s_ref)
+    power_est = torch.sum(s_est ** 2)
+    power_error_reverse = torch.sum((s_est - s_ref) ** 2)
+    sdr_2 = 10 * torch.log10(power_est / power_error_reverse)
+    
+    print(f"SDR_2: {sdr_2}")
+    # Mean of both SDRs
+    sdr_mean = 0.5 * (sdr_1 + sdr_2)
+    
+    return sdr_1.item(), sdr_2.item(), sdr_mean.item()
 
 def save_sdr(sdr:float, path: Path):
     if not os.path.exists(path):
-        content = {"sdr":[]}
+        content = {"sdr_1":[], "sdr_2":[], "sdr_mean":[]}
     else:
         with open(path, "r") as f:
             content = json.load(f)
-    content["sdr"].append(sdr)
+    content["sdr_1"].append(sdr[0])
+    content["sdr_2"].append(sdr[1])
+    content["sdr_mean"].append(sdr[2])
     with open(path, "w") as f:
         json.dump(content, f)

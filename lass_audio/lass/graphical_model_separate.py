@@ -70,7 +70,7 @@ class SparseDirectedGraphicalSeparator(Separator):
         print(f"x shape: {x.shape}")
 
         x_0, x_1 = x[0], x[1]
-        dec_bs = 1
+        dec_bs = 10
         num_batches = int(np.ceil(self.gm.num_beams / dec_bs))
         res_0, res_1 = [None]*num_batches, [None]*num_batches
 
@@ -89,8 +89,6 @@ class SparseDirectedGraphicalSeparator(Separator):
         # select best
         best_idx = (mean - torch.tensor(mixture).view(1, -1)).norm(p=2, dim=-1).argmin()
         return {source: self.decode_fn(xi.flatten()) for source, xi in zip(self.source_types, [x_0[best_idx], x_1[best_idx]])}
-
-        # return {source: self.decode_fn(xi.flatten()) for source, xi in zip(self.source_types, x)}
 
 # -----------------------------------------------------------------------------
 

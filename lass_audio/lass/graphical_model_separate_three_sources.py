@@ -3,6 +3,8 @@ import functools
 from pathlib import Path
 from typing import Callable, List, Mapping, Optional
 
+
+import numpy as np
 import sparse
 import torch
 import torchaudio
@@ -11,6 +13,7 @@ from torch.utils.data import DataLoader
 from diba.diba.interfaces import SeparationPrior
 from diba.diba.sparse_graphical_model import SparseDirectedGraphicalModel
 
+from diba.diba.sparse_utils import convert_sparse_coo_to_torch_coo
 from lass_audio.lass.datasets import ChunkedMultipleDataset, SeparationDataset
 from lass_audio.lass.datasets import SeparationSubset
 from lass_audio.lass.diba_interfaces import JukeboxPrior 
@@ -40,6 +43,7 @@ class SparseDirectedGraphicalSeparator(Separator):
         super().__init__()
         self.source_types = list(priors)
         self.priors = list(priors.values())
+        self.sums = sums
         print(f"Prior list size: ", len(self.priors))
         self.gm = SparseDirectedGraphicalModel(
                 priors = list(priors.values()),
@@ -59,11 +63,31 @@ class SparseDirectedGraphicalSeparator(Separator):
         mixture_codes = self.encode_fn(mixture)
 
         # separate mixture (x has shape [2, num. tokens])
-        x = self.gm.separate(mixture=mixture_codes)
+        x = self.gm.separate(mixture=mixture_codes).to(self.sums.device)
         print(f"x shape: {x.shape}")
 
-        # decode results
-        return {source: self.decode_fn(xi.view(-1)) for source, xi in zip(self.source_types, x)}
+        x_0, x_1, x_2 = x[0], x[1], x[2]
+        dec_bs = 10
+        num_batches = int(np.ceil(self.gm.num_beams / dec_bs))
+        res_0, res_1, res_2 = [None]*num_batches, [None]*num_batches, [None]*num_batches
+
+        print(x_0.shape, x_1.shape, x_2.shape)
+
+        for i in range(num_batches):
+            res_0[i] = self.decode_fn(x_0[i * dec_bs:(i + 1) * dec_bs].flatten())
+            res_1[i] = self.decode_fn(x_1[i * dec_bs:(i + 1) * dec_bs].flatten())
+            res_2[i] = self.decode_fn(x_2[i * dec_bs:(i + 1) * dec_bs].flatten())
+
+        res_0 = torch.cat(res_0, dim=0).view(self.gm.num_beams, -1)
+        res_1 = torch.cat(res_1, dim=0).view(self.gm.num_beams, -1)
+        res_2 = torch.cat(res_2, dim=0).view(self.gm.num_beams, -1)
+        
+        print(res_0.shape, res_1.shape, res_2.shape)
+        mean = torch.mean(torch.stack([res_0, res_1, res_2], dim=0), dim=0).cpu()
+        print(mean.shape)
+        # select best
+        best_idx = (mean - torch.tensor(mixture).view(1, -1)).norm(p=2, dim=-1).argmin()
+        return {source: self.decode_fn(xi.flatten()) for source, xi in zip(self.source_types, [x_0[best_idx], x_1[best_idx], x_2[best_idx]])}
 
 # -----------------------------------------------------------------------------
 
@@ -112,6 +136,7 @@ def separate_dataset(
         )
         print(f"chunk {batch_idx+1} saved!")
         del seps, origs
+        raise ValueError("Next iteration!")
 
 
 # -----------------------------------------------------------------------------
@@ -123,7 +148,7 @@ def save_separation(
     sample_rate: int,
     path: Path,
 ):
-    SDR_PATH = audio_root / "sdr.json"
+    SDR_PATH = audio_root / "sdr_3.json"
     assert_is_audio(*original_signals, *separated_signals)
     # assert original_1.shape == original_2.shape == separation_1.shape == separation_2.shape
     assert len(original_signals) == len(separated_signals)
@@ -139,10 +164,9 @@ def save_separation(
 
 
 def main(
-    audio_dirs: List[Path] = [audio_root / "data/test/piano", audio_root / "data/test/bass", audio_root / "data/test/drums"],
+    audio_dirs: List[Path] = [audio_root / "data/test/drums", audio_root / "data/test/piano", audio_root / "data/test/bass"],
     vqvae_path: Path = audio_root / "checkpoints/vqvae.pth.tar",
-    prior_paths: List[Path] = [audio_root / "checkpoints/prior_piano_44100.pth.tar",audio_root / "checkpoints/prior_bass_44100.pth.tar", audio_root / "checkpoints/prior_drums_44100.pth.tar"],
-    # sum_frequencies_path: Path = audio_root / "checkpoints/sum_frequencies.npz",
+    prior_paths: List[Path] = [audio_root / "checkpoints/prior_drums_44100.pth.tar",audio_root / "checkpoints/prior_piano_44100.pth.tar", audio_root / "checkpoints/prior_bass_44100.pth.tar"],
     sum_frequencies_path: Path = audio_root / "checkpoints/sum_dist_43500.npz",
     vqvae_type: str = "vqvae",
     prior_types: List[str] = ["small_prior", "small_prior", "small_prior"],
@@ -198,11 +222,7 @@ def main(
 
     with open(sum_frequencies_path, "rb") as f:
         sums_coo: sparse.COO = sparse.load_npz(sum_frequencies_path)
-        coords = torch.tensor(
-            sums_coo.coords, device=device, dtype=torch.long)
-        data = torch.tensor(
-            sums_coo.data, device=device, dtype=torch.float)
-        sums = torch.sparse_coo_tensor(coords, data, size=sums_coo.shape)
+        sums = convert_sparse_coo_to_torch_coo(sums_coo, device).to(device)
         print("Sums: ", sums)
 
     # create separator
@@ -233,3 +253,4 @@ def main(
 
 if __name__ == "__main__":
     main()
+
