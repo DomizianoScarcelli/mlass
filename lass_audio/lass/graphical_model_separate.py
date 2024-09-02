@@ -19,7 +19,6 @@ from lass_audio.lass.diba_interfaces import JukeboxPrior, SparseLikelihood
 from lass_audio.lass.utils import assert_is_audio, decode_latent_codes, get_dataset_subsample, get_raw_to_tokens, setup_priors, setup_vqvae
 from lass_audio.lass.datasets import ChunkedPairsDataset
 from diba.diba.utils import save_sdr, compute_sdr
-import copy
 
 audio_root = Path(__file__).parent.parent
 
@@ -46,19 +45,16 @@ class SparseDirectedGraphicalSeparator(Separator):
         self.source_types = list(priors)
         self.priors = list(priors.values())
         
-        self.sums = sums
-        self.num_tokens=sums.shape[-1]
-        self.topk = topk
         # lambda x: vqvae.encode(x.unsqueeze(-1), vqvae_level, vqvae_level + 1).view(-1).tolist()
         self.encode_fn = encode_fn
         # lambda x: decode_latent_codes(vqvae, x.squeeze(0), level=vqvae_level)
         self.decode_fn = decode_fn
         self.gm = SparseDirectedGraphicalModel(
                 priors = self.priors,
-                sums=self.sums,
-                num_tokens=self.num_tokens,
+                sums=sums,
+                num_tokens=sums.shape[-1],
                 num_sources=2,
-                topk=self.topk)
+                topk=topk)
 
     @torch.no_grad()
     def separate(self, mixture: torch.Tensor) -> Mapping[str, torch.Tensor]:
