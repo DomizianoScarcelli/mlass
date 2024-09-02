@@ -97,3 +97,29 @@ def save_psnr(psnr:float, path: Path):
     content["psnr"].append(psnr)
     with open(path, "w") as f:
         json.dump(content, f)
+
+
+def mean_quality(path: Path):
+    with open(path, "r") as f:
+        content = json.load(f)
+    if "psnr" in content:
+        values = content["psnr"]
+    elif "sdr" in content:
+        values = content["sdr"]
+    else:
+        raise Exception("No SDR nor PSNR found!")
+    mean = torch.mean(torch.tensor(values))
+    std = torch.std(torch.tensor(values))
+    result = {"mean": mean, "std": std, "num_samples": len(values)}
+    save_path = Path(str(path).split(".")[0] + "_mean.json")
+    with open(save_path, "w"):
+        json.dump(result, f)
+    return mean, std
+
+
+if __name__ == "__main__":
+    psnr_gm_2 = Path("/Users/dov/Desktop/wip-projects/latent-autoregressive-source-separation/lass_mnist/psrn_gm_2sources.json")
+    psnr_gm_2_raw = Path("/Users/dov/Desktop/wip-projects/latent-autoregressive-source-separation/lass_mnist/psrn_gm_2sources_raw.json")
+    mean_quality(psnr_gm_2)
+    mean_quality(psnr_gm_2_raw)
+
