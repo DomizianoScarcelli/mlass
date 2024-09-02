@@ -67,7 +67,7 @@ class DirectedGraphicalModel:
         
         old_message = torch.logsumexp(self.p_mmzs[i, token_idx].unsqueeze(0) + self.backward_results[i+1], dim=0)
         final_message = torch.logsumexp(prior + old_message, dim=-1) # this was -1, but with 0 the performances are better
-        return final_messag0
+        return final_message
  
     def compute_marginals(self, i: int) -> torch.Tensor:
         prior = self.p_zs[i]

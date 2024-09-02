@@ -275,7 +275,7 @@ def main(cfg):
             gen1lat,
             gen2lat,
             gtm,
-            n_iterations=1, #TODO: used to remove refine latents, just for debug
+            n_iterations=500, #TODO: used to remove refine latents, just for debug
             learning_rate=1e-1,
         )
 

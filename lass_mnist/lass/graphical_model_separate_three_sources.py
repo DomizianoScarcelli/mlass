@@ -321,7 +321,7 @@ def main(cfg):
             gen2lat,
             gen3lat,
             gtm,
-            n_iterations=500, #TODO: debug
+            n_iterations=1, #TODO: debug
             learning_rate=1e-1,
         )
 
