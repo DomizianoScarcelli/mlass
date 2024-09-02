@@ -62,7 +62,7 @@ class SparseDirectedGraphicalModel:
         sums = torch.log(self.p_mmzs[i, token_idx].unsqueeze(0).to_dense() + 1e-12)
         if i == 0:
             # 1 x K
-            return torch.logsumexp(sums + prior, dim=1)
+            return torch.logsumexp(sums + prior, dim=-1)
         old_message = torch.logsumexp(prior + self.forward_results[i-1], dim=0)
         final_message = torch.logsumexp(old_message + sums, dim=1)
         return final_message
@@ -154,8 +154,6 @@ class SparseDirectedGraphicalModel:
         #select best
         result = self.prior_past[:, :self.num_beams,1:]
         return result
-        # best_idx = (torch.mean(result.cpu().float(), dim=0).view(self.num_beams,-1) - torch.tensor(mixture).view(1, -1)).norm(p=2, dim=1).argmin()
-        # return result[:, best_idx]
 
 
 
