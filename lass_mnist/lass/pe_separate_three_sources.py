@@ -28,7 +28,7 @@ import multiprocessing as mp
 from typing import Sequence
 from numpy.random import default_rng
 from torch.utils.data import Dataset
-from diba.diba.utils import save_psnr
+from diba.diba.evaluation import save_psnr
 
 class TripletsDataset(Dataset):
     def __init__(self, dataset: Sequence, seed: int = 0):
