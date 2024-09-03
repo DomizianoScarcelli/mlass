@@ -86,7 +86,7 @@ class SparseDirectedGraphicalSeparator(Separator):
         print(mean.shape)
         # select best
         best_idx = (mean - torch.tensor(mixture).view(1, -1)).norm(p=2, dim=-1).argmin()
-        return {source: self.decode_fn(xi.flatten()) for source, xi in zip(self.source_types, [x_0[best_idx], x_1[best_idx]])}
+        return {source: self.decode_fn(xi.flatten()) for source, xi in zip(self.source_types, [x_0[best_idx], x_1[best_idx], x_2[best_idx]])}
 
 # -----------------------------------------------------------------------------
 

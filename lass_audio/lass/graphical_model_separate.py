@@ -43,6 +43,7 @@ class SparseDirectedGraphicalSeparator(Separator):
             ):
         super().__init__()
         self.source_types = list(priors)
+        self.sums = sums
         self.priors = list(priors.values())
         
         # lambda x: vqvae.encode(x.unsqueeze(-1), vqvae_level, vqvae_level + 1).view(-1).tolist()
@@ -224,7 +225,7 @@ def main(
 
     # subsample the test dataset
     indices = get_dataset_subsample(len(dataset), num_pairs, seed=seed)
-    subdataset = SeparationSubset(dataset, indices=indices)
+    subdataset = SeparationSubset(dataset, indices=list(indices))
 
     with open(sum_frequencies_path, "rb") as f:
         sums_coo: sparse.COO = sparse.load_npz(sum_frequencies_path)

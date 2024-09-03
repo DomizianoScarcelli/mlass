@@ -148,3 +148,4 @@ dmypy.json
 logs
 
 *.pt*
+**/results/**

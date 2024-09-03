@@ -20,10 +20,8 @@ class DirectedGraphicalModel:
         self.num_sources = num_sources
         self.priors = priors
         self.past_key = [None for _ in range(num_sources)]
-
+        self.topk = None
         self.p_mmzs = torch.log(1e-12 + sums)
-        print(self.p_mmzs.shape)
-        # self.p_mmzs -= torch.logsumexp(self.p_mmzs, dim=[2,3]).unsqueeze(2).unsqueeze(3)
         self.p_mmzs -= torch.logsumexp(self.p_mmzs, dim=1).unsqueeze(1)
         # self.pm = torch.logsumexp(self.p_mmzs, dim=[2,3])[-1].squeeze()
         self.pm = 0
@@ -53,8 +51,10 @@ class DirectedGraphicalModel:
         prior = torch.logsumexp(self.p_zs[i], dim=0)
         if i == 0:
             return torch.logsumexp(self.p_mmzs[i, token_idx].unsqueeze(0) + prior, dim=-1)
-        old_message = torch.logsumexp(prior + self.forward_results[i-1], dim=-1) # this was -1, but with 0 the performances are better
-        final_message = torch.logsumexp(self.p_mmzs[i, token_idx].unsqueeze(0) + old_message , dim=1)
+        # print(f"Forward: Old message before sum shape is: {(prior + self.forward_results[i-1]).shape}")
+        old_message = torch.logsumexp(prior + self.forward_results[i-1], dim=1) #NOTE:
+        # print(f"Forward: Final message before sum shape is: {(self.p_mmzs[i, token_idx].unsqueeze(0) + old_message).shape}")
+        final_message = torch.logsumexp(self.p_mmzs[i, token_idx].unsqueeze(0) + old_message , dim=2) #NOTE:
         return final_message
 
     def backward_pass(self, i: int, token_idx: torch.Tensor):
@@ -65,8 +65,10 @@ class DirectedGraphicalModel:
         if i == self.num_sources-2:
             return torch.logsumexp(prior + self.p_mmzs[i, token_idx].unsqueeze(0), dim=-1)
         
-        old_message = torch.logsumexp(self.p_mmzs[i, token_idx].unsqueeze(0) + self.backward_results[i+1], dim=0)
-        final_message = torch.logsumexp(prior + old_message, dim=-1) # this was -1, but with 0 the performances are better
+        # print(f"Backward: Old message before sum shape is: {(self.p_mmzs[i, token_idx].unsqueeze(0) + self.backward_results[i+1]).shape}")
+        old_message = torch.logsumexp(self.p_mmzs[i, token_idx].unsqueeze(0) + self.backward_results[i+1], dim=2) #NOTE:
+        # print(f"Backward: Final message before sum shape is: {(prior + old_message).shape}")
+        final_message = torch.logsumexp(prior + old_message, dim=1) #NOTE:
         return final_message
  
     def compute_marginals(self, i: int) -> torch.Tensor:
@@ -112,7 +114,7 @@ class DirectedGraphicalModel:
         marginals = torch.stack(self.marginal_results)
         # marginals = self.one_shot(mixture[i])
 
-        result = self.single_sample(marginals, topk=64)
+        result = self.single_sample(marginals, topk=self.topk)
         return result
 
     # def one_shot(self, token: torch.Tensor) -> torch.Tensor:

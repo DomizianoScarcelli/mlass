@@ -210,10 +210,10 @@ class EvaluateSeparationConfig:
 
     latent_length: int = MISSING
     vocab_size: int = MISSING
-    batch_size: int = 8
-    # batch_size: int = 1
+    batch_size: int = 1
     class_conditioned: bool = False
-    num_workers: int = mp.cpu_count() - 1
+    # num_workers: int = mp.cpu_count() - 1
+    num_workers: int = 0
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
     checkpoints: CheckpointsConfig = field(default_factory=CheckpointsConfig)
