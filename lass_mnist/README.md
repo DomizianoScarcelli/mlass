@@ -29,7 +29,7 @@ python -m lass_mnist.lass.graphical_model_separate_three_sources
 
 For 3 sources separation
 
-This will separate the test set of mnist into the folder `separated-images/graphical-model/2-sources` for two sources and `separated-images/graphical-model/3-sources` for three sources.
+This will separate the test set of mnist into the folder `./results/separation/graphical-model/2-sources` for two sources and `./results/separation/graphical-model/3-sources` for three sources.
 
 ### Probabilistic extractor
 
@@ -47,7 +47,9 @@ python -m lass_mnist.lass.pe_separate_three_sources
 
 For 3 sources separation
 
-This will separate the test set of mnist into the folder `separated-images/probabilistic-extractor/2-sources` for two sources and `separated-images/probabilistic-extractor/3-sources` for three sources.
+This will separate the test set of mnist into the folder `./results/separation/probabilistic-extractor/2-sources` for two sources and `./results/probabilistic-extractor/3-sources` for three sources.
+
+The PSNR for all image separation methods will be logged in the `./results/metrics/` folder
 
 ---
 

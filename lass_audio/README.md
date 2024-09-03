@@ -24,7 +24,25 @@ The Slakh2100 test data can be found [here](https://drive.google.com/file/d/1Gf5
 Similarly to before, place the downloaded file inside of the directory `lass_audio/data` and extract it with the command `tar -xf bass-drums-slakh.tar`
 
 ## Separate images
-To separate you can run the script
-```bash
-PYTONPATH=. python lass/separate.py
-``` 
+### Belief propagation via graphical model
+To run the separation using belief propagation via a graphical model, put yourself in the root of the repository and run the script
+
+```sh
+python -m lass_audio.lass.graphical_model_separate
+```
+
+For 2 sources separation
+
+```sh
+python -m lass_audio.lass.graphical_model_separate_three_sources
+```
+
+For 3 sources separation
+
+This will separate the test set of mnist into the folder `./results/separation/graphical-model/2-sources` for two sources and `./results/separation/graphical-model/3-sources` for three sources.
+
+The SDR for will be logged in the `./results/metrics/` folder
+
+---
+
+Note that each time a separation method is called, the corrisponding directory is emptied.
