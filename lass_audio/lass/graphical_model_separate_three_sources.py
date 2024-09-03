@@ -18,7 +18,7 @@ from lass_audio.lass.datasets import ChunkedMultipleDataset, SeparationDataset
 from lass_audio.lass.datasets import SeparationSubset
 from lass_audio.lass.diba_interfaces import JukeboxPrior 
 from lass_audio.lass.utils import assert_is_audio, decode_latent_codes, get_dataset_subsample, get_raw_to_tokens, setup_priors, setup_vqvae
-from diba.diba.utils import save_sdr, compute_sdr
+from diba.diba.evaluation import save_sdr, compute_sdr
 
 
 audio_root = Path(__file__).parent.parent

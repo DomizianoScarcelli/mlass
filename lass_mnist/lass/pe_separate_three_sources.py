@@ -19,7 +19,7 @@ from torchvision.utils import save_image
 import numpy as np
 import random
 
-from diba.diba.naive_separation import separate
+from diba.diba.pe_separation import separate
 
 from ..modules import VectorQuantizedVAE
 from .utils import refine_latents, CONFIG_DIR, ROOT_DIR, CONFIG_STORE, refine_latents_three
@@ -28,7 +28,7 @@ import multiprocessing as mp
 from typing import Sequence
 from numpy.random import default_rng
 from torch.utils.data import Dataset
-from diba.diba.utils import save_psnr
+from diba.diba.evaluation import save_psnr
 
 class TripletsDataset(Dataset):
     def __init__(self, dataset: Sequence, seed: int = 0):
