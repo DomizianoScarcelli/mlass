@@ -3,7 +3,7 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import numpy as np
 
-def create_image_grid(path: Path, max_images: int = None):
+def create_image_grid(path: Path, num_col: int, num_row: int):
     ori_path = path / 'ori'
     sep_path = path / 'sep'
     
@@ -14,22 +14,21 @@ def create_image_grid(path: Path, max_images: int = None):
     if not ori_images or not sep_images:
         raise ValueError("No images found in the specified directories.")
     
-    if max_images:
-        ori_images = ori_images[:max_images]
-        sep_images = sep_images[:max_images]
+    num_images = num_col * num_row
+    
+    # Limit the images to the number that can fit in the grid
+    ori_images = ori_images[:num_images]
+    sep_images = sep_images[:num_images]
     
     assert len(ori_images) == len(sep_images), "Mismatch between ori and sep images"
     
-    num_images = len(ori_images)
+    # Adjust figure size based on the grid dimensions
+    aspect_ratio = num_col / num_row
+    fig_width = 15  # Fixed width
+    fig_height = fig_width / aspect_ratio  # Adjust height based on aspect ratio
     
-    # Ensure grid size is a positive integer
-    grid_size = int(np.ceil(np.sqrt(num_images)))
-    if grid_size == 0:
-        raise ValueError("Number of images to display is zero, cannot create a grid.")
-
     # Create and save the grid for original images
-    fig, axes = plt.subplots(grid_size, grid_size, figsize=(15, 15))
-    # fig.suptitle('Original Images')
+    fig, axes = plt.subplots(num_row, num_col, figsize=(fig_width, fig_height))
     
     for ax, img_path in zip(axes.flatten(), ori_images):
         img = Image.open(img_path)
@@ -37,7 +36,7 @@ def create_image_grid(path: Path, max_images: int = None):
         ax.axis('off')
     
     # Hide any empty subplots
-    for ax in axes.flatten()[num_images:]:
+    for ax in axes.flatten()[len(ori_images):]:
         ax.axis('off')
 
     plt.tight_layout()
@@ -48,8 +47,7 @@ def create_image_grid(path: Path, max_images: int = None):
     plt.close(fig)
 
     # Create and save the grid for separated images
-    fig, axes = plt.subplots(grid_size, grid_size, figsize=(15, 15))
-    # fig.suptitle('Separation Results')
+    fig, axes = plt.subplots(num_row, num_col, figsize=(fig_width, fig_height))
     
     for ax, img_path in zip(axes.flatten(), sep_images):
         img = Image.open(img_path)
@@ -57,7 +55,7 @@ def create_image_grid(path: Path, max_images: int = None):
         ax.axis('off')
 
     # Hide any empty subplots
-    for ax in axes.flatten()[num_images:]:
+    for ax in axes.flatten()[len(sep_images):]:
         ax.axis('off')
 
     plt.tight_layout()
@@ -71,4 +69,7 @@ def create_image_grid(path: Path, max_images: int = None):
     print(f"Separation results grid saved to {sep_grid_path}")
 
 if __name__ == "__main__":
-    create_image_grid(Path('lass_mnist/results/separation/gm-separated-images'), max_images=16)
+    create_image_grid(Path('lass_mnist/results/separation/gm-separated-images'), num_col=2, num_row=4)
+    create_image_grid(Path('lass_mnist/results/separation/gm-three-separated-images'), num_col=3, num_row=4)
+    create_image_grid(Path('lass_mnist/results/separation/pe-separated-images'), num_col=2, num_row=4)
+    create_image_grid(Path('lass_mnist/results/separation/pe-three-separated-images'), num_col=3, num_row=4)
