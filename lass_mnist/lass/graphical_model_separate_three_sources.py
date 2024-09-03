@@ -19,13 +19,12 @@ from torchvision.utils import save_image
 import numpy as np
 import random
 
-from diba.diba.naive_separation import separate
+from diba.diba.pe_separation import separate
 
 from ..modules import VectorQuantizedVAE
-from .utils import refine_latents, CONFIG_DIR, ROOT_DIR, CONFIG_STORE, refine_latents_three
-from .diba_interaces import DenseMarginalLikelihood, UnconditionedTransformerPrior, DenseLikelihood
+from .utils import CONFIG_DIR, ROOT_DIR, CONFIG_STORE, refine_latents_three
+from .diba_interaces import UnconditionedTransformerPrior
 from diba.diba.graphical_model import DirectedGraphicalModel
-import multiprocessing as mp
 from typing import Sequence
 from numpy.random import default_rng
 from torch.utils.data import Dataset
