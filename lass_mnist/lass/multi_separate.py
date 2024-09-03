@@ -7,6 +7,7 @@ to separate.
 from dataclasses import dataclass, field
 from typing import Tuple, List, Any, Optional, Mapping, Callable, Literal
 
+from pathlib import Path
 import shutil
 import hydra
 import torch
@@ -27,7 +28,7 @@ import multiprocessing as mp
 from typing import Sequence
 from numpy.random import default_rng
 from torch.utils.data import Dataset
-
+from diba.diba.utils import save_psnr
 
 class PairsDataset(Dataset):
     def __init__(self, dataset: Sequence, seed: int = 0):
@@ -209,7 +210,7 @@ def main(cfg):
     assert isinstance(transformer, PreTrainedModel)
 
     # create output directory
-    result_dir = ROOT_DIR / "multi-separated-images"
+    result_dir = ROOT_DIR / "pe-separated-images"
     if result_dir.exists():
         shutil.rmtree(result_dir)
 
@@ -276,6 +277,8 @@ def main(cfg):
         gtm = (gt1 + gt2) / 2.0
 
         psnr = batched_psnr_unconditional(gts=[gt1, gt2], gens=[gen1, gen2])
+        save_psnr(psnr, Path("lass_mnist") / Path("psrn_pe_2sources_raw.json"))
+
         print(
             f"The psnr before refining for batch {i} is {psnr}")
 
@@ -285,7 +288,7 @@ def main(cfg):
             gen1lat,
             gen2lat,
             gtm,
-            n_iterations=1,
+            n_iterations=500,
             learning_rate=1e-1,
         )
 
@@ -297,6 +300,7 @@ def main(cfg):
             save_image(gt2[j],  result_dir / f"ori/{img_idx}-2.png")
 
         psnr = batched_psnr_unconditional(gts=[gt1, gt2], gens=[gen1, gen2])
+        save_psnr(psnr, Path("lass_mnist") / Path("psrn_pe_2sources.json"))
         print(
             f"The psnr after refining for batch {i} is {psnr}")
         psnrs.append(psnr)

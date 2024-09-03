@@ -14,8 +14,41 @@ You can download the necessary checkpoints from [here](https://drive.google.com/
 Place the downloaded file inside of the directory `lass_mnist/checkpoints` and extract it with the command `tar -xf lass-mnist-ckpts.tar`.
 
 ## Separate images
-To separate MNIST test, you can run the script
-```bash
-PYTONPATH=. python lass/separate.py 
-``` 
-This will separate the test set of mnist into the folder `separated_mnist`.
+### Belief propagation via graphical model
+To run the separation using belief propagation via a graphical model, put yourself in the root of the repository and run the script
+
+```sh
+python -m lass_mnist.lass.graphical_model_separate
+```
+
+For 2 sources separation
+
+```sh
+python -m lass_mnist.lass.graphical_model_separate_three_sources
+```
+
+For 3 sources separation
+
+This will separate the test set of mnist into the folder `separated-images/graphical-model/2-sources` for two sources and `separated-images/graphical-model/3-sources` for three sources.
+
+### Probabilistic extractor
+
+To run the separation using the probabilistic extractor, put yourself in the root of the repository and run the script
+
+```sh
+python -m lass_mnist.lass.pe_separate
+```
+
+For 2 sources separation
+
+```sh
+python -m lass_mnist.lass.pe_separate_three_sources
+```
+
+For 3 sources separation
+
+This will separate the test set of mnist into the folder `separated-images/probabilistic-extractor/2-sources` for two sources and `separated-images/probabilistic-extractor/3-sources` for three sources.
+
+---
+
+Note that each time a separation method is called, the corrisponding directory is emptied.

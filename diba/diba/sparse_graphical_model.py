@@ -78,7 +78,7 @@ class SparseDirectedGraphicalModel:
             return torch.logsumexp(prior + sums, dim=-1)
         
         old_message = torch.logsumexp(sums + self.backward_results[i+1], dim=0)
-        final_message = torch.logsumexp(prior + old_message, dim=0) 
+        final_message = torch.logsumexp(prior + old_message, dim=1) 
         return final_message
 
     def compute_marginals(self, i: int) -> torch.Tensor:

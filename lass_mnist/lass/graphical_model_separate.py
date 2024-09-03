@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 import shutil
 from typing import Tuple, List, Any, Optional, Callable, Literal
 
+from pathlib import Path
 import hydra
 import torch
 import torchmetrics
@@ -21,6 +22,7 @@ import multiprocessing as mp
 from typing import Sequence, Union
 from numpy.random import default_rng
 from torch.utils.data import Dataset
+from diba.diba.utils import save_psnr
 
 
 class PairsDataset(Dataset):
@@ -265,6 +267,7 @@ def main(cfg):
         )
 
         psnr = batched_psnr_unconditional(gts=[gt1, gt2], gens=[gen1, gen2])
+        save_psnr(psnr, Path("lass_mnist") / Path("psrn_gm_2sources_raw.json"))
         print(
             f"The psnr before refining for batch {i} is {psnr}")
 
@@ -275,7 +278,7 @@ def main(cfg):
             gen1lat,
             gen2lat,
             gtm,
-            n_iterations=1, #TODO: used to remove refine latents, just for debug
+            n_iterations=500, #TODO: used to remove refine latents, just for debug
             learning_rate=1e-1,
         )
 
@@ -287,6 +290,7 @@ def main(cfg):
             save_image(gt2[j],  result_dir / f"ori/{img_idx}-2.png")
 
         psnr = batched_psnr_unconditional(gts=[gt1, gt2], gens=[gen1, gen2])
+        save_psnr(psnr, Path("lass_mnist") / Path("psrn_gm_2sources.json"))
         print(
             f"\nThe psnr for batch {i} is {psnr}")
         psnrs.append(psnr)
