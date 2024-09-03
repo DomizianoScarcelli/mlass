@@ -53,15 +53,23 @@ def mean_quality(path: Path):
         raise Exception("No SDR nor PSNR found!")
     mean = torch.mean(torch.tensor(values))
     std = torch.std(torch.tensor(values))
-    result = {"mean": mean, "std": std, "num_samples": len(values)}
+    result = {"mean": mean.item(), "std": std.item(), "num_samples": len(values)}
     save_path = Path(str(path).split(".")[0] + "_mean.json")
-    with open(save_path, "w"):
+    with open(save_path, "w") as f:
         json.dump(result, f)
     return mean, std
 
 
 if __name__ == "__main__":
-    psnr_gm_2 = Path("/Users/dov/Desktop/wip-projects/latent-autoregressive-source-separation/lass_mnist/psrn_gm_2sources.json")
-    psnr_gm_2_raw = Path("/Users/dov/Desktop/wip-projects/latent-autoregressive-source-separation/lass_mnist/psrn_gm_2sources_raw.json")
+    psnr_gm_2 = Path("lass_mnist/results/metrics/psrn_gm_2sources.json")
+    psnr_gm_3 = Path("lass_mnist/results/metrics/psrn_gm_3sources.json")
+    psnr_pe_2 = Path("lass_mnist/results/metrics/psrn_pe_2sources.json")
+    psnr_pe_3 = Path("lass_mnist/results/metrics/psrn_pe_3sources.json")
+    sdr_2 = Path("lass_audio/results/metrics/sdr_gm_2sources.json")
+    sdr_3 = Path("lass_audio/results/metrics/sdr_gm_3sources_0101.json")
     mean_quality(psnr_gm_2)
-    mean_quality(psnr_gm_2_raw)
+    mean_quality(psnr_gm_3)
+    mean_quality(psnr_pe_2)
+    mean_quality(psnr_pe_3)
+    mean_quality(sdr_2)
+    mean_quality(sdr_3)
